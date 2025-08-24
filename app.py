@@ -1097,7 +1097,7 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
     return validated_mask
 
 # Analysis function
-def run_network_analysis(masks, membrane_mask):
+def run_network_analysis(masks, membrane_mask, diam):
     """Run only the network analysis step"""
     
     with st.spinner("🧮 Crunching numbers and analyzing your network like a pro..."):
@@ -1228,22 +1228,26 @@ if run_segmentation:
         st.rerun()  # Force refresh to update button state
 
 
+# Ensure cell diameter is available for sidebar display and analysis
+diam = st.session_state.get('cell_diameter', 0.0)
+
 # Run analysis when button is clicked
 if run_analysis and st.session_state.segmentation_complete:
     # Ensure cell diameter is available for analysis
     diam = st.session_state.get('cell_diameter', 0.0)
 
     # Run analysis only
+  # Run analysis only
     quantifier = run_network_analysis(
-        st.session_state.masks, st.session_state.membrane_mask
+        st.session_state.masks, st.session_state.membrane_mask, diam
     )
-    
+
     # Update session state
     st.session_state.analysis_complete = True
     st.session_state.quantifier = quantifier
-    
+
     st.success("🚀 Bam! Analysis complete! Your ZO-1 network is now quantified!")
-    
+
     # Add a fun completion message
     st.markdown("""
     <div class="fun-fact">
@@ -1276,7 +1280,7 @@ else:
 if st.session_state.segmentation_complete:
     masks = st.session_state.masks
     membrane_mask = st.session_state.membrane_mask
-    
+
     # Quick segmentation preview
     st.markdown("## 🔬 Segmentation Results")
     
