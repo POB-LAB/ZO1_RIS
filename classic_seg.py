@@ -42,8 +42,28 @@ def _postprocess_and_watershed(
     img_u8: np.ndarray,
     min_obj: int = 200,
     min_peak_dist: int = 8,
+    skeleton_thickness: int = 1,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Refine membrane mask and apply watershed to obtain cell labels."""
+    """Refine membrane mask and apply watershed to obtain cell labels and a skeleton.
+
+    Parameters
+    ----------
+    mem_mask : np.ndarray
+        Initial membrane mask.
+    img_u8 : np.ndarray
+        Original grayscale image.
+    min_obj : int, optional
+        Minimum object size for cleaning, by default 200.
+    min_peak_dist : int, optional
+        Minimum distance between watershed seeds, by default 8.
+    skeleton_thickness : int, optional
+        Pixel thickness of the returned skeleton, by default 1 (single-pixel).
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Labelled image and processed skeleton mask.
+    """
 
     mem = morphology.remove_small_objects(mem_mask.astype(bool), min_size=50)
     mem = morphology.binary_closing(mem, morphology.disk(1))
@@ -67,7 +87,13 @@ def _postprocess_and_watershed(
     grad = filters.sobel(img_u8)
     lab = segmentation.watershed(grad, markers=markers, mask=inside.astype(bool))
     lab = morphology.remove_small_objects(lab, min_size=min_obj)
-    return lab.astype(np.int32), mem.astype(bool)
+
+    # Skeletonise the membrane to obtain a single-pixel-wide network
+    skel = morphology.skeletonize(mem.astype(bool))
+    if skeleton_thickness > 1:
+        skel = morphology.dilation(skel, morphology.disk(max(1, skeleton_thickness // 2)))
+
+    return lab.astype(np.int32), skel.astype(bool)
 
 
 def compute_cell_metrics(
@@ -127,6 +153,7 @@ def segment_zo1_gmm(
     smooth_sigma: float = 1.0,
     use_ridge: bool = True,
     min_peak_dist: int = 8,
+    skeleton_thickness: int = 1,
 ) -> SegmentationResult:
     """Segment membranes using a Gaussian Mixture Model on intensities."""
 
@@ -138,7 +165,9 @@ def segment_zo1_gmm(
     labels = (gmm.predict(X) == bright_idx).reshape(blur.shape).astype(np.uint8)
 
     mem = cv2.bitwise_and(labels, _apply_ridge(blur)) if use_ridge else labels
-    lab, mem_proc = _postprocess_and_watershed(mem, blur, min_obj, min_peak_dist)
+    lab, mem_proc = _postprocess_and_watershed(
+        mem, blur, min_obj, min_peak_dist, skeleton_thickness
+    )
     _, stats = compute_cell_metrics(lab)
     return SegmentationResult(lab, mem_proc, stats)
 
@@ -149,6 +178,7 @@ def segment_zo1_kmeans(
     smooth_sigma: float = 1.0,
     use_ridge: bool = True,
     min_peak_dist: int = 8,
+    skeleton_thickness: int = 1,
 ) -> SegmentationResult:
     """Segment membranes using K-means clustering on intensities."""
 
@@ -160,7 +190,9 @@ def segment_zo1_kmeans(
     labels = (km.labels_ == bright_idx).reshape(blur.shape).astype(np.uint8)
 
     mem = cv2.bitwise_and(labels, _apply_ridge(blur)) if use_ridge else labels
-    lab, mem_proc = _postprocess_and_watershed(mem, blur, min_obj, min_peak_dist)
+    lab, mem_proc = _postprocess_and_watershed(
+        mem, blur, min_obj, min_peak_dist, skeleton_thickness
+    )
     _, stats = compute_cell_metrics(lab)
     return SegmentationResult(lab, mem_proc, stats)
 
@@ -174,8 +206,34 @@ def segment_zo1_otsu(
     smooth_sigma: float = 1.0,
     use_ridge: bool = True,
     min_peak_dist: int = 8,
+    thresh_multiplier: float = 1.0,
+    skeleton_thickness: int = 1,
 ) -> SegmentationResult:
-    """Segment membranes using Otsu or adaptive thresholding."""
+    """Segment membranes using Otsu or adaptive thresholding.
+
+    Parameters
+    ----------
+    img_u8 : np.ndarray
+        Input 8-bit image.
+    adaptive : bool, optional
+        Use adaptive thresholding instead of Otsu, by default False.
+    block : int, optional
+        Block size for adaptive thresholding, by default 51.
+    offset : float, optional
+        Offset for adaptive thresholding, by default 0.0.
+    min_obj : int, optional
+        Minimum object size for watershed, by default 200.
+    smooth_sigma : float, optional
+        Gaussian blur sigma, by default 1.0.
+    use_ridge : bool, optional
+        Apply ridge filtering before thresholding, by default True.
+    min_peak_dist : int, optional
+        Minimum distance between watershed peaks, by default 8.
+    thresh_multiplier : float, optional
+        Multiplier applied to Otsu threshold, by default 1.0.
+    skeleton_thickness : int, optional
+        Pixel thickness of the returned skeleton, by default 1.
+    """
 
     blur = cv2.GaussianBlur(img_u8, (0, 0), smooth_sigma)
     if adaptive:
@@ -183,11 +241,14 @@ def segment_zo1_otsu(
             block += 1  # ensure odd
         thresh = filters.threshold_local(blur, block_size=block, offset=offset)
     else:
-        thresh = filters.threshold_otsu(blur)
+        thresh = filters.threshold_otsu(blur) * thresh_multiplier
+        thresh = np.clip(thresh, 0, 255)
     labels = (blur > thresh).astype(np.uint8)
 
     mem = cv2.bitwise_and(labels, _apply_ridge(blur)) if use_ridge else labels
-    lab, mem_proc = _postprocess_and_watershed(mem, blur, min_obj, min_peak_dist)
+    lab, mem_proc = _postprocess_and_watershed(
+        mem, blur, min_obj, min_peak_dist, skeleton_thickness
+    )
     _, stats = compute_cell_metrics(lab)
     return SegmentationResult(lab, mem_proc, stats)
 
