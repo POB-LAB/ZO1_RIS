@@ -9,6 +9,7 @@ This is a deployment-ready version of the ZO-1 Network Analysis Tool, optimized 
 - **CPU-Optimized**: Designed for deployment without GPU requirements
 - **Smart Resampling**: Default 512x512 processing with option for full resolution
 - **Export Functionality**: CSV and detailed report downloads
+- **Classic Segmentation Toolkit**: Otsu thresholding by default with adjustable strength, optional ridge filtering, watershed-based labelling and skeletonisation with configurable thickness
 
 ## 🚀 **Live Demo**
 Access the deployed application at: [Your Streamlit Cloud URL]
