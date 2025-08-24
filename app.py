@@ -364,12 +364,16 @@ rescale_option = st.sidebar.selectbox(
     help="Rescale to 512x512 for faster processing, or keep original size (much slower!)"
 )
 
-# Convert to scale factor for internal use
+# Convert to scale factor for internal use - REAL 512px resampling
+H, W = img_gray.shape
 if rescale_option == "Rescale to 512x512 (default)":
-    scale = 0.5  # This will give us 512x512 from typical 1024x1024 images
-    st.sidebar.info("🔍 **Resampling Active**: Image will be scaled to 512x512 for faster processing. RIS calculation automatically adjusts for this scaling to maintain accuracy.")
+    TARGET = 512
+    scale = min(1.0, TARGET / max(H, W))
+    w_small, h_small = int(round(W * scale)), int(round(H * scale))
+    st.sidebar.info(f"🔍 **Resampling Active**: {W}×{H} → {w_small}×{h_small} (scale={scale:.3f})")
 else:
     scale = 1.0
+    w_small, h_small = W, H
     st.sidebar.warning("🐌 **Full Resolution**: Processing at original image size. This will take much longer - grab a coffee! ☕")
 
 # Force CPU-only mode for deployment
@@ -940,11 +944,11 @@ def run_segmentation_only():
     """Run only the AI-powered segmentation step"""
     
     with st.spinner("🤖 Our AI is working its magic on your image... (First run takes longer to load models - grab a coffee! ☕)"):
-        # Downsample if requested
+        # Downsample if requested - using pre-computed dimensions
         h, w = img_gray.shape
         if scale < 1.0:
-            small = cv2.resize(img_gray, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
-            diam_small = max(1, int(diam*scale))
+            small = cv2.resize(img_gray, (w_small, h_small), interpolation=cv2.INTER_AREA)
+            diam_small = max(1, int(round(diam * scale)))
         else:
             small = img_gray
             diam_small = diam
@@ -960,11 +964,14 @@ def run_segmentation_only():
             augment=True
         )
         
-        # Upsample masks if needed
+        # Upsample labels back to ORIGINAL size without truncating IDs
         if scale < 1.0:
-            masks = cv2.resize(masks_small.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
+            masks = cv2.resize(
+                masks_small.astype(np.float32), (w, h),
+                interpolation=cv2.INTER_NEAREST
+            ).astype(np.int32)
         else:
-            masks = masks_small
+            masks = masks_small.astype(np.int32)
     
     with st.spinner("🔍 Drawing the cell boundaries (our AI found them!)..."):
         # Create membrane mask for network analysis
@@ -1085,7 +1092,7 @@ def run_network_analysis(masks, membrane_mask):
             # If auto mode, calculate d_ref from actual cell measurements
             if normalization_mode == "Auto (from cell measurements)":
                 d_ref, cell_stats = quantifier.calculate_dref_from_cells(
-                    st.session_state.masks, membrane_mask, diam, scale
+                    st.session_state.masks, membrane_mask, diam, scale_factor=1.0  # <- critical: no second scaling
                 )
                 # Update the results with the calculated d_ref
                 quantifier.results['d_ref'] = d_ref
