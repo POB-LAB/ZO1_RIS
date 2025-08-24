@@ -13,7 +13,7 @@ from PIL import Image
 import pandas as pd
 from io import StringIO
 
-# Cellpose imports
+# AI segmentation imports
 from cellpose import models
 from skimage.segmentation import find_boundaries
 
@@ -21,7 +21,7 @@ from skimage.segmentation import find_boundaries
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 
-# Classic CPU segmentation
+# Classic segmentation
 from classic_seg import (
     segment_zo1_gmm,
     segment_zo1_kmeans,
@@ -311,12 +311,12 @@ img_gray, orig = load_image(uploaded_file)
 # Segmentation engine selection
 seg_engine = st.sidebar.selectbox(
     "Segmentation Engine",
-    ["Cellpose (AI)", "Classic (CPU)"],
+    ["Classic (GPU)", "GPU intense AI method"],
     index=0,
 )
 
-if seg_engine == "Cellpose (AI)":
-    st.sidebar.markdown("🔬 **AI Segmentation Parameters**")
+if seg_engine == "GPU intense AI method":
+    st.sidebar.markdown("🔬 **GPU Intense AI Parameters**")
     diam = st.sidebar.slider(
         "Estimated Cell diameter (px) for better qulity segmentation! 🎯",
         min_value=20,
@@ -333,7 +333,7 @@ else:
         index=0,
     )
     smooth_sigma = st.sidebar.slider("Smoothing σ", 0.0, 2.0, 1.0, 0.1)
-    min_obj = st.sidebar.slider("Min object size (px)", 50, 1000, 200, 50)
+    min_obj = st.sidebar.slider("Min object size (px)", 5, 1000, 200, 5)
     min_peak_dist = st.sidebar.slider("Seed min_distance (px)", 1, 20, 8)
     use_ridge = st.sidebar.checkbox("Ridge filter", True)
     skeleton_thickness = st.sidebar.slider("Skeleton thickness (px)", 1, 5, 1)
@@ -348,8 +348,10 @@ else:
             offset = st.sidebar.slider("Offset", -30, 30, 0)
         else:
             thresh_multiplier = st.sidebar.slider(
-                "Otsu threshold multiplier", 0.5, 1.5, 1.0, 0.1
+                "💪 Otsu threshold multiplier", 0.0, 4.0, 1.0, 0.1,
+                help="Make Otsu threshold more aggressive for noisy images (higher = stricter filtering)"
             )
+            st.sidebar.info("Adjust the multiplier to flex the Otsu threshold 💪")
     pixel_size = st.sidebar.number_input(
         "Pixel size (µm/px)",
         min_value=0.0,
@@ -364,7 +366,7 @@ col1, col2 = st.sidebar.columns(2)
 
 with col1:
     seg_button_label = (
-        "🔬 Run Segmentation" if seg_engine == "Cellpose (AI)" else "🔬 Run Classic Segmentation"
+        "🔬 Run Segmentation" if seg_engine == "GPU intense AI method" else "🔬 Run Classic Segmentation"
     )
     run_segmentation = st.button(
         seg_button_label,
@@ -470,8 +472,8 @@ if enable_contour_validation:
     else:  # Otsu
         otsu_strength = st.sidebar.slider(
             "💪 Otsu Strength Multiplier",
-            min_value=0.5,
-            max_value=3.0,
+            min_value=0.0,
+            max_value=4.0,
             value=1.0,
             step=0.1,
             help="Make Otsu threshold more aggressive for noisy images (higher = stricter filtering)"
@@ -770,7 +772,7 @@ class ZO1RISQuantifier:
         This is more accurate than using theoretical packing factors.
         
         Args:
-            masks: Cellpose segmentation masks
+            masks: GPU-intense AI segmentation masks
             membrane_mask: Validated membrane network mask
             d_eff_pixels: User-provided cell diameter estimate
             scale_factor: Image scaling factor (1.0 = original, 0.5 = half size, etc.)
@@ -829,16 +831,16 @@ class ZO1RISQuantifier:
         # Cell density (cells per total image area)
         cell_density = len(cell_areas) / image_area
         
-        # 🚨 IMPORTANT: Use Cellpose's calculated diameter for d_ref (scaled to original coordinates)
+        # 🚨 IMPORTANT: Use AI model's calculated diameter for d_ref (scaled to original coordinates)
         # This gives us the most accurate cell size from the actual image
-        
-        # Method 1: Cellpose-measured diameter (most accurate, properly scaled)
+
+        # Method 1: AI-measured diameter (most accurate, properly scaled)
         d_ref_cellpose = self.kappa / avg_cell_diameter_original
-        
+
         # Method 2: User-provided diameter (for reference only)
         d_ref_user = self.kappa / float(d_eff_pixels)
-        
-        # Use Cellpose d_ref for accuracy
+
+        # Use AI d_ref for accuracy
         d_ref_final = d_ref_cellpose
         
         # Store cell statistics
@@ -855,7 +857,7 @@ class ZO1RISQuantifier:
             'd_ref_user': d_ref_user,
             'd_ref_final': d_ref_final,
             'scale_factor': scale_factor,
-            'note': f'Using Cellpose-measured d_ref for accuracy (scaled from {scale_factor}x resampled image)'
+            'note': f'Using AI-measured d_ref for accuracy (scaled from {scale_factor}x resampled image)'
         }
         
         return d_ref_final, cell_stats
@@ -1032,7 +1034,7 @@ def run_segmentation_only():
 
 def validate_contours_with_ai(contours, image, method="K-means clustering", dilation_pixels=4):
     """
-    Validate Cellpose contours using AI-powered methods to remove phantom boundaries.
+    Validate AI-generated contours using auxiliary methods to remove phantom boundaries.
     Only keeps contours where there's actual signal in the image.
     
     Args:
@@ -1084,7 +1086,7 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
         otsu_threshold, ai_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     # Create a dilated mask to be more permissive (allow some tolerance)
-    # This helps with slight misalignments between Cellpose and AI validation
+    # This helps with slight misalignments between the AI model and validation
     if dilation_pixels > 0:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         ai_mask_dilated = cv2.dilate(ai_mask, kernel, iterations=dilation_pixels)
@@ -1162,13 +1164,13 @@ def run_network_analysis(masks, membrane_mask, diam):
 
 # Run segmentation when button is clicked
 if run_segmentation:
-    if seg_engine == "Cellpose (AI)" and cp_model is not None:
-        # Run segmentation only using Cellpose
+    if seg_engine == "GPU intense AI method" and cp_model is not None:
+        # Run segmentation only using GPU-intense AI method
         masks, membrane_mask = run_segmentation_only()
         st.session_state.segmentation_stats = None
         st.session_state.pixel_size = None
         st.session_state.cell_diameter = diam
-    elif seg_engine == "Classic (CPU)":
+    elif seg_engine == "Classic (GPU)":
         img_u8 = img_gray.astype(np.uint8)
         if classic_method == "GMM":
             res = segment_zo1_gmm(
@@ -1263,15 +1265,15 @@ if st.session_state.segmentation_complete:
     st.sidebar.success("🎯 Segmentation Complete!")
     st.sidebar.info("🎮 Time to play with the analysis parameters!")
     st.sidebar.markdown("**Current Segmentation:**")
-    if seg_engine == "Cellpose (AI)":
+    if seg_engine == "GPU intense AI method":
         st.sidebar.markdown(f"- Cell diameter: {diam} px")
         st.sidebar.markdown(f"- Scale: {scale}x")
-        st.sidebar.markdown("- Processing: CPU (deployment mode)")
+        st.sidebar.markdown("- Processing: GPU intense AI")
     else:
         st.sidebar.markdown(f"- Method: {classic_method}")
         st.sidebar.markdown(f"- Min object size: {min_obj}px")
         st.sidebar.markdown(f"- Mean cell diameter: {diam:.1f} px")
-        st.sidebar.markdown("- Processing: Classic CPU")
+        st.sidebar.markdown("- Processing: Classic GPU")
 else:
     st.sidebar.warning("🤔 Hmm... no segmentation yet!")
     st.sidebar.info("🎯 Configure parameters and let our AI work its magic!")
@@ -1300,7 +1302,7 @@ if st.session_state.segmentation_complete:
 
         overlay = np.stack([img_gray_resized]*3, axis=-1)
 
-        if seg_engine == "Classic (CPU)":
+        if seg_engine == "Classic (GPU)":
             validated_contours = find_boundaries(masks, mode="outer")
         else:
             validated_contours = membrane_mask
@@ -1313,7 +1315,7 @@ if st.session_state.segmentation_complete:
         overlay[thickened_contours > 0, 2] = 0    # No blue
         st.image(overlay, use_container_width=True)
 
-        if seg_engine == "Classic (CPU)" and st.session_state.segmentation_stats:
+        if seg_engine == "Classic (GPU)" and st.session_state.segmentation_stats:
             stats = st.session_state.segmentation_stats
             st.markdown("### Summary")
             st.write(f"Cells: {stats['n_cells']} | Mean area: {stats['mean_area']:.1f} px² | Mean equiv. diam: {stats['mean_equiv_diam']:.2f} px")
@@ -1390,7 +1392,7 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
             validation_status = f"✅ Otsu Validated {strength_emoji}"
             threshold_info = f"Base: {otsu_threshold}, Adjusted: {adjusted_threshold} ({strength_desc})"
     else:
-        validation_status = "⚠️ Raw Cellpose"
+        validation_status = "⚠️ Raw GPU intense AI"
         threshold_info = "No validation applied"
 
     st.info(f"🔍 **Analysis Mode**: {validation_status}")
@@ -1434,11 +1436,11 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
                 st.info(f"""
                  **🔬 Auto d_ref Calculation (Updated):**
                  - **Measured cell diameter**: {cell_stats.get('avg_cell_diameter', 'N/A'):.1f} px (scaled from {cell_stats.get('scale_factor', 1.0)}x resampled image)
-                 - **Cellpose d_ref (κ/measured_diameter)**: {cell_stats.get('d_ref_cellpose', 'N/A'):.4f}
+                 - **AI d_ref (κ/measured_diameter)**: {cell_stats.get('d_ref_cellpose', 'N/A'):.4f}
                  - **User d_ref (κ/user_diameter)**: {cell_stats.get('d_ref_user', 'N/A'):.4f}
                  - **Final d_ref used**: {summary.get('d_ref', 'N/A'):.4f}
-                 
-                 **💡 Note**: Using Cellpose-measured d_ref for accuracy (properly scaled from resampled image)
+
+                 **💡 Note**: Using AI-measured d_ref for accuracy (properly scaled from resampled image)
                 """)
     else:
         # Legacy TiJOR metrics
@@ -1731,9 +1733,9 @@ Cell Measurements (Auto Mode):
 
 d_ref Calculation Details:
   Measured cell diameter: {cell_stats.get('avg_cell_diameter', 'N/A'):.1f} px (scaled from {cell_stats.get('scale_factor', 1.0)}x resampled image)
-  Cellpose d_ref (κ/measured_diameter): {cell_stats.get('d_ref_cellpose', 'N/A'):.4f}
+  AI d_ref (κ/measured_diameter): {cell_stats.get('d_ref_cellpose', 'N/A'):.4f}
   User d_ref (κ/user_diameter): {cell_stats.get('d_ref_user', 'N/A'):.4f}
-  Note: Using Cellpose-measured d_ref for accuracy (properly scaled)
+  Note: Using AI-measured d_ref for accuracy (properly scaled)
 """
                 
                 st.download_button(
