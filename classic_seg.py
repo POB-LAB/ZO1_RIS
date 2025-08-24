@@ -35,6 +35,7 @@ class SegmentationResult:
     labels: np.ndarray  # int32 labelled image
     membrane: np.ndarray  # bool membrane mask
     stats: Dict[str, float]
+    binary_mask: Optional[np.ndarray] = None  # raw threshold mask
 
 
 def _postprocess_and_watershed(
@@ -169,7 +170,7 @@ def segment_zo1_gmm(
         mem, blur, min_obj, min_peak_dist, skeleton_thickness
     )
     _, stats = compute_cell_metrics(lab)
-    return SegmentationResult(lab, mem_proc, stats)
+    return SegmentationResult(lab, mem_proc, stats, labels)
 
 
 def segment_zo1_kmeans(
@@ -194,7 +195,7 @@ def segment_zo1_kmeans(
         mem, blur, min_obj, min_peak_dist, skeleton_thickness
     )
     _, stats = compute_cell_metrics(lab)
-    return SegmentationResult(lab, mem_proc, stats)
+    return SegmentationResult(lab, mem_proc, stats, labels)
 
 
 def segment_zo1_otsu(
@@ -250,5 +251,5 @@ def segment_zo1_otsu(
         mem, blur, min_obj, min_peak_dist, skeleton_thickness
     )
     _, stats = compute_cell_metrics(lab)
-    return SegmentationResult(lab, mem_proc, stats)
+    return SegmentationResult(lab, mem_proc, stats, labels)
 
