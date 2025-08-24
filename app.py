@@ -1233,7 +1233,11 @@ diam = st.session_state.get('cell_diameter', 0.0)
 
 # Run analysis when button is clicked
 if run_analysis and st.session_state.segmentation_complete:
+    # Ensure cell diameter is available for analysis
+    diam = st.session_state.get('cell_diameter', 0.0)
+
     # Run analysis only
+  # Run analysis only
     quantifier = run_network_analysis(
         st.session_state.masks, st.session_state.membrane_mask, diam
     )
