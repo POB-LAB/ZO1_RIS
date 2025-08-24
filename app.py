@@ -263,6 +263,8 @@ if 'analysis_complete' not in st.session_state:
     st.session_state.analysis_complete = False
 if 'show_overlays' not in st.session_state:
     st.session_state.show_overlays = False
+if 'otsu_mask' not in st.session_state:
+    st.session_state.otsu_mask = None
 
 # Sidebar configuration
 st.sidebar.header("⚙️ Analysis Configuration")
@@ -1026,11 +1028,14 @@ def run_segmentation_only():
         
         # Apply AI-powered validation to remove phantom boundaries
         if enable_contour_validation:
-            membrane_mask = validate_contours_with_ai(contours, img_gray, validation_method, 4)  # Fixed 4-pixel dilation
+            membrane_mask, ai_mask, otsu_mask = validate_contours_with_ai(contours, img_gray, validation_method, 4)  # Fixed 4-pixel dilation
         else:
             membrane_mask = contours.astype(np.uint8)
-    
-    return masks, membrane_mask
+            ai_mask = None
+            _, otsu_mask = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            membrane_mask = np.logical_and(membrane_mask > 0, otsu_mask > 0).astype(np.uint8)
+
+    return masks, membrane_mask, ai_mask, otsu_mask
 
 def validate_contours_with_ai(contours, image, method="K-means clustering", dilation_pixels=4):
     """
@@ -1044,7 +1049,7 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
         dilation_pixels: Number of pixels to dilate mask for tolerance
     
     Returns:
-        Validated membrane mask
+        Tuple of (validated membrane mask, method-specific mask, otsu mask)
     """
     if method == "K-means clustering":
         # K-means clustering for bimodal images
@@ -1093,10 +1098,16 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
     else:
         ai_mask_dilated = ai_mask
     
+    # Always compute Otsu mask for secondary validation
+    _, otsu_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
     # Combine: contour must exist AND there must be signal in AI mask
-    validated_mask = np.logical_and(contours > 0, ai_mask_dilated > 0).astype(np.uint8)
-    
-    return validated_mask
+    validated_mask = np.logical_and(contours > 0, ai_mask_dilated > 0)
+
+    # Additional validation with Otsu mask
+    combined_mask = np.logical_and(validated_mask, otsu_mask > 0).astype(np.uint8)
+
+    return combined_mask, ai_mask, otsu_mask
 
 # Analysis function
 def run_network_analysis(masks, membrane_mask, diam):
@@ -1166,10 +1177,12 @@ def run_network_analysis(masks, membrane_mask, diam):
 if run_segmentation:
     if seg_engine == "GPU intense AI method" and cp_model is not None:
         # Run segmentation only using GPU-intense AI method
-        masks, membrane_mask = run_segmentation_only()
+        masks, membrane_mask, ai_mask, otsu_mask = run_segmentation_only()
         st.session_state.segmentation_stats = None
         st.session_state.pixel_size = None
         st.session_state.cell_diameter = diam
+        st.session_state.ai_mask = ai_mask
+        st.session_state.otsu_mask = otsu_mask
     elif seg_engine == "Classic (GPU)":
         img_u8 = img_gray.astype(np.uint8)
         if classic_method == "GMM":
@@ -1205,10 +1218,14 @@ if run_segmentation:
             )
         masks = res.labels
         membrane_mask = res.membrane
+        _, otsu_mask = cv2.threshold(img_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        membrane_mask = np.logical_and(membrane_mask > 0, otsu_mask > 0).astype(np.uint8)
         st.session_state.segmentation_stats = res.stats
         st.session_state.pixel_size = pixel_size
         diam = res.stats.get('mean_equiv_diam', 0.0)
         st.session_state.cell_diameter = diam
+        st.session_state.ai_mask = None
+        st.session_state.otsu_mask = otsu_mask
     else:
         masks = None
         membrane_mask = None
@@ -1301,6 +1318,15 @@ if st.session_state.segmentation_complete:
             img_gray_resized = img_gray
 
         overlay = np.stack([img_gray_resized]*3, axis=-1)
+        otsu_mask = st.session_state.get('otsu_mask')
+        if otsu_mask is not None:
+            if img_gray_resized.shape != otsu_mask.shape:
+                otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
+            else:
+                otsu_mask_resized = otsu_mask
+            overlay[otsu_mask_resized > 0, 1] = 255  # Green mask
+            overlay[otsu_mask_resized > 0, 0] = 0
+            overlay[otsu_mask_resized > 0, 2] = 0
 
         if seg_engine == "Classic (GPU)":
             validated_contours = find_boundaries(masks, mode="outer")
@@ -1477,8 +1503,15 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
         img_gray_resized = cv2.resize(img_gray, (masks.shape[1], masks.shape[0]), interpolation=cv2.INTER_LINEAR)
     else:
         img_gray_resized = img_gray
-        
+
     ax.imshow(img_gray_resized, cmap='gray')
+    otsu_mask = st.session_state.get('otsu_mask')
+    if otsu_mask is not None:
+        if img_gray_resized.shape != otsu_mask.shape:
+            otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
+        else:
+            otsu_mask_resized = otsu_mask
+        ax.imshow(np.ma.masked_where(otsu_mask_resized == 0, otsu_mask_resized), cmap='Greens', alpha=0.3)
     
     if analysis_geometry == "Circles (RIS - recommended)":
         ax.set_title('ZO-1 Network with RIS Analysis Overlays', fontsize=14, fontweight='bold')
