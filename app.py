@@ -1110,8 +1110,22 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
     return combined_mask, ai_mask, otsu_mask
 
 # Analysis function
-def run_network_analysis(masks, membrane_mask, diam):
-    """Run only the network analysis step"""
+def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
+    """Run only the network analysis step.
+
+    Parameters
+    ----------
+    masks : np.ndarray
+        Labelled cell mask from segmentation.
+    membrane_mask : np.ndarray
+        Skeletonised membrane mask used for non-Otsu methods.
+    diam : float
+        Effective cell diameter in pixels.
+    otsu_mask : np.ndarray, optional
+        Raw Otsu threshold mask (after applying strength multiplier). When
+        provided for Otsu/Adaptive segmentation, RIS calculations will use
+        this mask directly to ensure consistency with the visualised mask.
+    """
     
     with st.spinner("🧮 Crunching numbers and analyzing your network like a pro..."):
         # Choose quantifier based on geometry selection
@@ -1135,8 +1149,16 @@ def run_network_analysis(masks, membrane_mask, diam):
             else:  # Control mode
                 quantifier_mode = "control"
             
+            analysis_mask = membrane_mask
+            if (
+                seg_engine == "Classic (GPU)"
+                and classic_method in ("Otsu", "Adaptive")
+                and otsu_mask is not None
+            ):
+                analysis_mask = otsu_mask
+
             results = quantifier.quantify_network(
-                membrane_mask,
+                analysis_mask,
                 img_gray.shape,
                 initial_area_frac=initial_size/100.0,
                 max_area_frac=max_size/100.0,
@@ -1150,7 +1172,7 @@ def run_network_analysis(masks, membrane_mask, diam):
             # If auto mode, calculate d_ref from actual cell measurements
             if normalization_mode == "Auto (from cell measurements)":
                 d_ref, cell_stats = quantifier.calculate_dref_from_cells(
-                    st.session_state.masks, membrane_mask, diam, scale_factor=1.0  # <- critical: no second scaling
+                    st.session_state.masks, analysis_mask, diam, scale_factor=1.0  # <- critical: no second scaling
                 )
                 # Update the results with the calculated d_ref
                 quantifier.results['d_ref'] = d_ref
@@ -1217,9 +1239,8 @@ if run_segmentation:
                 skeleton_thickness=skeleton_thickness,
             )
         masks = res.labels
-        membrane_mask = res.membrane
-        _, otsu_mask = cv2.threshold(img_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        membrane_mask = np.logical_and(membrane_mask > 0, otsu_mask > 0).astype(np.uint8)
+        otsu_mask = (res.binary_mask > 0).astype(np.uint8) * 255
+        membrane_mask = np.logical_and(res.membrane > 0, otsu_mask > 0).astype(np.uint8)
         st.session_state.segmentation_stats = res.stats
         st.session_state.pixel_size = pixel_size
         diam = res.stats.get('mean_equiv_diam', 0.0)
@@ -1256,9 +1277,12 @@ if run_analysis and st.session_state.segmentation_complete:
     diam = st.session_state.get('cell_diameter', 0.0)
 
     # Run analysis only
-  # Run analysis only
+    # Run analysis only
     quantifier = run_network_analysis(
-        st.session_state.masks, st.session_state.membrane_mask, diam
+        st.session_state.masks,
+        st.session_state.membrane_mask,
+        diam,
+        st.session_state.get('otsu_mask'),
     )
 
     # Update session state
@@ -1309,7 +1333,10 @@ if st.session_state.segmentation_complete:
         st.image(img_gray, use_container_width=True)
     
     with col2:
-        st.subheader("Cell Boundaries (Validated)")
+        if seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive"):
+            st.subheader("Otsu Mask")
+        else:
+            st.subheader("Cell Boundaries (Validated)")
         # Create overlay with contours - ensure same dimensions
         if img_gray.shape != masks.shape:
             # Resize img_gray to match masks dimensions
@@ -1324,21 +1351,28 @@ if st.session_state.segmentation_complete:
                 otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
             else:
                 otsu_mask_resized = otsu_mask
-            overlay[otsu_mask_resized > 0, 1] = 255  # Green mask
-            overlay[otsu_mask_resized > 0, 0] = 0
-            overlay[otsu_mask_resized > 0, 2] = 0
+            if seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive"):
+                overlay[otsu_mask_resized > 0, 0] = 255  # Red mask
+                overlay[otsu_mask_resized > 0, 1] = 0
+                overlay[otsu_mask_resized > 0, 2] = 0
+            else:
+                overlay[otsu_mask_resized > 0, 1] = 255  # Green mask
+                overlay[otsu_mask_resized > 0, 0] = 0
+                overlay[otsu_mask_resized > 0, 2] = 0
 
-        if seg_engine == "Classic (GPU)":
-            validated_contours = find_boundaries(masks, mode="outer")
-        else:
-            validated_contours = membrane_mask
+        if not (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")):
+            if seg_engine == "Classic (GPU)":
+                validated_contours = find_boundaries(masks, mode="outer")
+            else:
+                validated_contours = membrane_mask
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        thickened_contours = cv2.dilate(validated_contours.astype(np.uint8), kernel, iterations=1)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            thickened_contours = cv2.dilate(validated_contours.astype(np.uint8), kernel, iterations=1)
 
-        overlay[thickened_contours > 0, 0] = 255  # Red contours
-        overlay[thickened_contours > 0, 1] = 0    # No green
-        overlay[thickened_contours > 0, 2] = 0    # No blue
+            overlay[thickened_contours > 0, 0] = 255  # Red contours
+            overlay[thickened_contours > 0, 1] = 0    # No green
+            overlay[thickened_contours > 0, 2] = 0    # No blue
+
         st.image(overlay, use_container_width=True)
 
         if seg_engine == "Classic (GPU)" and st.session_state.segmentation_stats:
@@ -1511,7 +1545,8 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
             otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
         else:
             otsu_mask_resized = otsu_mask
-        ax.imshow(np.ma.masked_where(otsu_mask_resized == 0, otsu_mask_resized), cmap='Greens', alpha=0.3)
+        cmap_color = 'Reds' if (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")) else 'Greens'
+        ax.imshow(np.ma.masked_where(otsu_mask_resized == 0, otsu_mask_resized), cmap=cmap_color, alpha=0.3)
     
     if analysis_geometry == "Circles (RIS - recommended)":
         ax.set_title('ZO-1 Network with RIS Analysis Overlays', fontsize=14, fontweight='bold')
@@ -1524,7 +1559,8 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
     if show_contours:
         # Use the validated membrane mask from the quantifier analysis
         validated_membrane_mask = st.session_state.membrane_mask
-        ax.contour(validated_membrane_mask, [0.5], colors='red', linewidths=1, alpha=0.9)
+        contour_color = 'blue' if (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")) else 'red'
+        ax.contour(validated_membrane_mask, [0.5], colors=contour_color, linewidths=1, alpha=0.9)
     
     # Draw analysis overlays based on geometry type
     if analysis_geometry == "Circles (RIS - recommended)":
