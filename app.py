@@ -21,6 +21,14 @@ from skimage.segmentation import find_boundaries
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 
+# Classic CPU segmentation
+from classic_seg import (
+    segment_zo1_gmm,
+    segment_zo1_kmeans,
+    segment_zo1_otsu,
+    compute_cell_metrics,
+)
+
 # Set page configuration
 st.set_page_config(
     page_title="ZO-1 Network Analysis",
@@ -300,19 +308,47 @@ def load_image(uploaded_file):
 # Load image
 img_gray, orig = load_image(uploaded_file)
 
-# AI Segmentation parameters
-st.sidebar.markdown("🔬 **AI Segmentation Parameters**")
-
-diam = st.sidebar.slider(
-    "Estimated Cell diameter (px) for better qulity segmentation! 🎯", 
-    min_value=20, 
-    max_value=200, 
-    value=100,  # Default as requested
-    step=10,
-    help="Estimate the size of cells in pixels from your image. This is just an estimate - try again if you're not happy with the segmentation! 🧪"
+# Segmentation engine selection
+seg_engine = st.sidebar.selectbox(
+    "Segmentation Engine",
+    ["Cellpose (AI)", "Classic (CPU)"],
+    index=0,
 )
 
-
+if seg_engine == "Cellpose (AI)":
+    st.sidebar.markdown("🔬 **AI Segmentation Parameters**")
+    diam = st.sidebar.slider(
+        "Estimated Cell diameter (px) for better qulity segmentation! 🎯",
+        min_value=20,
+        max_value=200,
+        value=100,
+        step=10,
+        help="Estimate the size of cells in pixels from your image. This is just an estimate - try again if you're not happy with the segmentation! 🧪",
+    )
+else:
+    st.sidebar.markdown("🧪 **Classic Segmentation Parameters**")
+    classic_method = st.sidebar.selectbox(
+        "Method",
+        ["GMM", "K-means", "Otsu", "Adaptive"],
+        index=0,
+    )
+    smooth_sigma = st.sidebar.slider("Smoothing σ", 0.0, 2.0, 1.0, 0.1)
+    min_obj = st.sidebar.slider("Min object size (px)", 50, 1000, 200, 50)
+    min_peak_dist = st.sidebar.slider("Seed min_distance (px)", 1, 20, 8)
+    use_ridge = st.sidebar.checkbox("Ridge filter", True)
+    adaptive = False
+    block = 51
+    offset = 0.0
+    if classic_method in ("Otsu", "Adaptive"):
+        if classic_method == "Adaptive":
+            adaptive = True
+            block = st.sidebar.slider("Block size", 3, 255, 51, step=2)
+            offset = st.sidebar.slider("Offset", -30, 30, 0)
+    pixel_size = st.sidebar.number_input(
+        "Pixel size (µm/px)",
+        min_value=0.0,
+        value=0.0,
+    )
 
 # Run buttons - moved to top for easy access
 st.sidebar.markdown("---")
@@ -321,10 +357,13 @@ st.sidebar.markdown("🚀 **Run Analysis**")
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
+    seg_button_label = (
+        "🔬 Run Segmentation" if seg_engine == "Cellpose (AI)" else "🔬 Run Classic Segmentation"
+    )
     run_segmentation = st.button(
-        "🔬 Run Segmentation",
+        seg_button_label,
         type="primary",
-        use_container_width=True
+        use_container_width=True,
     )
 
 with col2:
@@ -1116,29 +1155,56 @@ def run_network_analysis(masks, membrane_mask):
     return quantifier
 
 # Run segmentation when button is clicked
-if run_segmentation and cp_model is not None:
-    # Run segmentation only
-    masks, membrane_mask = run_segmentation_only()
-    
-    # Update session state
-    st.session_state.segmentation_complete = True
-    st.session_state.masks = masks
-    st.session_state.membrane_mask = membrane_mask
-    st.session_state.analysis_complete = False  # Reset analysis state
-    
-    st.success("🎉 Woohoo! Our AI found all the cells! Now you can play with the analysis parameters!")
-    
-    # Add a fun message
-    st.markdown("""
-    <div class="fun-fact">
-        🎮 Ready to analyze? Click that 'Run Analysis' button and cross your fingers! ✨
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.rerun()  # Force refresh to update button state
+if run_segmentation:
+    if seg_engine == "Cellpose (AI)" and cp_model is not None:
+        # Run segmentation only using Cellpose
+        masks, membrane_mask = run_segmentation_only()
+        st.session_state.segmentation_stats = None
+        st.session_state.pixel_size = None
+    elif seg_engine == "Classic (CPU)":
+        img_u8 = img_gray.astype(np.uint8)
+        if classic_method == "GMM":
+            res = segment_zo1_gmm(img_u8, min_obj=min_obj, smooth_sigma=smooth_sigma,
+                                  use_ridge=use_ridge, min_peak_dist=min_peak_dist)
+        elif classic_method == "K-means":
+            res = segment_zo1_kmeans(img_u8, min_obj=min_obj, smooth_sigma=smooth_sigma,
+                                     use_ridge=use_ridge, min_peak_dist=min_peak_dist)
+        else:
+            res = segment_zo1_otsu(img_u8,
+                                   adaptive=adaptive if classic_method == "Adaptive" else False,
+                                   block=block,
+                                   offset=offset,
+                                   min_obj=min_obj,
+                                   smooth_sigma=smooth_sigma,
+                                   use_ridge=use_ridge,
+                                   min_peak_dist=min_peak_dist)
+        masks = res.labels
+        membrane_mask = res.membrane
+        st.session_state.segmentation_stats = res.stats
+        st.session_state.pixel_size = pixel_size
+    else:
+        masks = None
+        membrane_mask = None
+
+    if masks is not None:
+        st.session_state.segmentation_complete = True
+        st.session_state.masks = masks
+        st.session_state.membrane_mask = membrane_mask
+        st.session_state.analysis_complete = False  # Reset analysis state
+
+        st.success("🎉 Woohoo! Segmentation finished! Now you can play with the analysis parameters!")
+
+        st.markdown("""
+<div class=\"fun-fact\">
+    🎮 Ready to analyze? Click that 'Run Analysis' button and cross your fingers! ✨
+</div>
+""", unsafe_allow_html=True)
+
+        st.rerun()  # Force refresh to update button state
+
 
 # Run analysis when button is clicked
-if run_analysis and cp_model is not None and st.session_state.segmentation_complete:
+if run_analysis and st.session_state.segmentation_complete:
     # Run analysis only
     quantifier = run_network_analysis(st.session_state.masks, st.session_state.membrane_mask)
     
@@ -1162,13 +1228,15 @@ st.sidebar.markdown("### 📊 Current Status")
 if st.session_state.segmentation_complete:
     st.sidebar.success("🎯 Segmentation Complete!")
     st.sidebar.info("🎮 Time to play with the analysis parameters!")
-    
-    # Show current segmentation parameters
     st.sidebar.markdown("**Current Segmentation:**")
-    st.sidebar.markdown(f"- Cell diameter: {diam} px")
-    st.sidebar.markdown(f"- Scale: {scale}x")
-    st.sidebar.markdown("- Processing: CPU (deployment mode)")
-    
+    if seg_engine == "Cellpose (AI)":
+        st.sidebar.markdown(f"- Cell diameter: {diam} px")
+        st.sidebar.markdown(f"- Scale: {scale}x")
+        st.sidebar.markdown("- Processing: CPU (deployment mode)")
+    else:
+        st.sidebar.markdown(f"- Method: {classic_method}")
+        st.sidebar.markdown(f"- Min object size: {min_obj}px")
+        st.sidebar.markdown("- Processing: Classic CPU")
 else:
     st.sidebar.warning("🤔 Hmm... no segmentation yet!")
     st.sidebar.info("🎯 Configure parameters and let our AI work its magic!")
@@ -1194,51 +1262,35 @@ if st.session_state.segmentation_complete:
             img_gray_resized = cv2.resize(img_gray, (masks.shape[1], masks.shape[0]), interpolation=cv2.INTER_LINEAR)
         else:
             img_gray_resized = img_gray
-            
+
         overlay = np.stack([img_gray_resized]*3, axis=-1)
-        
-        # Show validated contours (after Otsu validation)
-        validated_contours = membrane_mask
-        
-        # Apply validated contours with increased thickness
-        # Dilate the contours by 2 pixels to make them thicker
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # 5x5 kernel for ~2 pixel dilation
-        thickened_contours = cv2.dilate(validated_contours, kernel, iterations=1)
-        
+
+        if seg_engine == "Classic (CPU)":
+            validated_contours = find_boundaries(masks, mode="outer")
+        else:
+            validated_contours = membrane_mask
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        thickened_contours = cv2.dilate(validated_contours.astype(np.uint8), kernel, iterations=1)
+
         overlay[thickened_contours > 0, 0] = 255  # Red contours
         overlay[thickened_contours > 0, 1] = 0    # No green
         overlay[thickened_contours > 0, 2] = 0    # No blue
         st.image(overlay, use_container_width=True)
-        
-        # Add comparison option
-        if st.checkbox("🔍 Show Contour Comparison (Raw vs Validated)", value=False):
-            col2a, col2b = st.columns(2)
-            
-            with col2a:
-                st.caption("Raw Cellpose Contours")
-                raw_overlay = np.stack([img_gray_resized]*3, axis=-1)
-                raw_contours = find_boundaries(masks, mode='inner')
-                raw_overlay[raw_contours > 0, 0] = 255
-                raw_overlay[raw_contours > 0, 1] = 0
-                raw_overlay[raw_contours > 0, 2] = 0
-                st.image(raw_overlay, use_container_width=True)
-            
-            with col2b:
-                st.caption("AI-Validated Contours (Thickened)")
-                ai_overlay = np.stack([img_gray_resized]*3, axis=-1)
-                # Use the same thickened contours for consistency
-                ai_overlay[thickened_contours > 0, 0] = 255
-                ai_overlay[thickened_contours > 0, 1] = 0
-                ai_overlay[thickened_contours > 0, 2] = 0
-                st.image(ai_overlay, use_container_width=True)
-                
-                # Show statistics
-                raw_count = np.sum(raw_contours > 0)
-                validated_count = np.sum(validated_contours > 0)
-                removed_count = raw_count - validated_count
-                st.info(f"📊 AI contour validation removed {removed_count} phantom pixels ({removed_count/raw_count*100:.1f}% reduction)")
-    
-    st.info(f"🎉 **AI Magic Complete!**: {int(masks.max()) if masks is not None else 0} cells found and ready for analysis!")
+
+        if seg_engine == "Classic (CPU)" and st.session_state.segmentation_stats:
+            stats = st.session_state.segmentation_stats
+            st.markdown("### Summary")
+            st.write(f"Cells: {stats['n_cells']} | Mean area: {stats['mean_area']:.1f} px² | Mean equiv. diam: {stats['mean_equiv_diam']:.2f} px")
+            if st.session_state.pixel_size:
+                st.write(f"Mean area: {stats.get('mean_area_um2',0):.1f} µm² | Mean equiv. diam: {stats.get('mean_equiv_diam_um',0):.2f} µm")
+            df, _ = compute_cell_metrics(masks, pixel_size=st.session_state.pixel_size)
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button('Export CSV', csv, 'cell_metrics.csv', 'text/csv')
+            report_lines = [f"{k}: {v}" for k, v in stats.items()]
+            report = '\n'.join(report_lines)
+            st.download_button('Download report (.txt)', report, 'summary.txt', 'text/plain')
+
     
     # Add a fun fact with animal comparison
     cell_count = int(masks.max()) if masks is not None else 0
