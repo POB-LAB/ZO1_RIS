@@ -329,21 +329,27 @@ else:
     st.sidebar.markdown("🧪 **Classic Segmentation Parameters**")
     classic_method = st.sidebar.selectbox(
         "Method",
-        ["GMM", "K-means", "Otsu", "Adaptive"],
+        ["Otsu", "GMM", "K-means", "Adaptive"],
         index=0,
     )
     smooth_sigma = st.sidebar.slider("Smoothing σ", 0.0, 2.0, 1.0, 0.1)
     min_obj = st.sidebar.slider("Min object size (px)", 50, 1000, 200, 50)
     min_peak_dist = st.sidebar.slider("Seed min_distance (px)", 1, 20, 8)
     use_ridge = st.sidebar.checkbox("Ridge filter", True)
+    skeleton_thickness = st.sidebar.slider("Skeleton thickness (px)", 1, 5, 1)
     adaptive = False
     block = 51
     offset = 0.0
+    thresh_multiplier = 1.0
     if classic_method in ("Otsu", "Adaptive"):
         if classic_method == "Adaptive":
             adaptive = True
             block = st.sidebar.slider("Block size", 3, 255, 51, step=2)
             offset = st.sidebar.slider("Offset", -30, 30, 0)
+        else:
+            thresh_multiplier = st.sidebar.slider(
+                "Otsu threshold multiplier", 0.5, 1.5, 1.0, 0.1
+            )
     pixel_size = st.sidebar.number_input(
         "Pixel size (µm/px)",
         min_value=0.0,
@@ -1091,7 +1097,7 @@ def validate_contours_with_ai(contours, image, method="K-means clustering", dila
     return validated_mask
 
 # Analysis function
-def run_network_analysis(masks, membrane_mask):
+def run_network_analysis(masks, membrane_mask, diam):
     """Run only the network analysis step"""
     
     with st.spinner("🧮 Crunching numbers and analyzing your network like a pro..."):
@@ -1161,27 +1167,46 @@ if run_segmentation:
         masks, membrane_mask = run_segmentation_only()
         st.session_state.segmentation_stats = None
         st.session_state.pixel_size = None
+        st.session_state.cell_diameter = diam
     elif seg_engine == "Classic (CPU)":
         img_u8 = img_gray.astype(np.uint8)
         if classic_method == "GMM":
-            res = segment_zo1_gmm(img_u8, min_obj=min_obj, smooth_sigma=smooth_sigma,
-                                  use_ridge=use_ridge, min_peak_dist=min_peak_dist)
+            res = segment_zo1_gmm(
+                img_u8,
+                min_obj=min_obj,
+                smooth_sigma=smooth_sigma,
+                use_ridge=use_ridge,
+                min_peak_dist=min_peak_dist,
+                skeleton_thickness=skeleton_thickness,
+            )
         elif classic_method == "K-means":
-            res = segment_zo1_kmeans(img_u8, min_obj=min_obj, smooth_sigma=smooth_sigma,
-                                     use_ridge=use_ridge, min_peak_dist=min_peak_dist)
+            res = segment_zo1_kmeans(
+                img_u8,
+                min_obj=min_obj,
+                smooth_sigma=smooth_sigma,
+                use_ridge=use_ridge,
+                min_peak_dist=min_peak_dist,
+                skeleton_thickness=skeleton_thickness,
+            )
         else:
-            res = segment_zo1_otsu(img_u8,
-                                   adaptive=adaptive if classic_method == "Adaptive" else False,
-                                   block=block,
-                                   offset=offset,
-                                   min_obj=min_obj,
-                                   smooth_sigma=smooth_sigma,
-                                   use_ridge=use_ridge,
-                                   min_peak_dist=min_peak_dist)
+            res = segment_zo1_otsu(
+                img_u8,
+                adaptive=adaptive if classic_method == "Adaptive" else False,
+                block=block,
+                offset=offset,
+                min_obj=min_obj,
+                smooth_sigma=smooth_sigma,
+                use_ridge=use_ridge,
+                min_peak_dist=min_peak_dist,
+                thresh_multiplier=thresh_multiplier,
+                skeleton_thickness=skeleton_thickness,
+            )
         masks = res.labels
         membrane_mask = res.membrane
         st.session_state.segmentation_stats = res.stats
         st.session_state.pixel_size = pixel_size
+        diam = res.stats.get('mean_equiv_diam', 0.0)
+        st.session_state.cell_diameter = diam
     else:
         masks = None
         membrane_mask = None
@@ -1203,17 +1228,22 @@ if run_segmentation:
         st.rerun()  # Force refresh to update button state
 
 
+# Ensure cell diameter is available for sidebar display and analysis
+diam = st.session_state.get('cell_diameter', 0.0)
+
 # Run analysis when button is clicked
 if run_analysis and st.session_state.segmentation_complete:
     # Run analysis only
-    quantifier = run_network_analysis(st.session_state.masks, st.session_state.membrane_mask)
-    
+    quantifier = run_network_analysis(
+        st.session_state.masks, st.session_state.membrane_mask, diam
+    )
+
     # Update session state
     st.session_state.analysis_complete = True
     st.session_state.quantifier = quantifier
-    
+
     st.success("🚀 Bam! Analysis complete! Your ZO-1 network is now quantified!")
-    
+
     # Add a fun completion message
     st.markdown("""
     <div class="fun-fact">
@@ -1236,6 +1266,7 @@ if st.session_state.segmentation_complete:
     else:
         st.sidebar.markdown(f"- Method: {classic_method}")
         st.sidebar.markdown(f"- Min object size: {min_obj}px")
+        st.sidebar.markdown(f"- Mean cell diameter: {diam:.1f} px")
         st.sidebar.markdown("- Processing: Classic CPU")
 else:
     st.sidebar.warning("🤔 Hmm... no segmentation yet!")
@@ -1245,7 +1276,7 @@ else:
 if st.session_state.segmentation_complete:
     masks = st.session_state.masks
     membrane_mask = st.session_state.membrane_mask
-    
+
     # Quick segmentation preview
     st.markdown("## 🔬 Segmentation Results")
     
