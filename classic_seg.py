@@ -65,7 +65,7 @@ def _postprocess_and_watershed(
         Labelled image and processed skeleton mask.
     """
 
-    mem = morphology.remove_small_objects(mem_mask.astype(bool), min_size=50)
+    mem = morphology.remove_small_objects(mem_mask.astype(bool), min_size=5)
     mem = morphology.binary_closing(mem, morphology.disk(1))
     mem = morphology.binary_dilation(mem, morphology.disk(1))
     mem = mem.astype(np.uint8)
@@ -88,8 +88,8 @@ def _postprocess_and_watershed(
     lab = segmentation.watershed(grad, markers=markers, mask=inside.astype(bool))
     lab = morphology.remove_small_objects(lab, min_size=min_obj)
 
-    # Skeletonise the membrane to obtain a single-pixel-wide network
-    skel = morphology.skeletonize(mem.astype(bool))
+    # Extract boundaries from the labelled regions to avoid spurious lines
+    skel = segmentation.find_boundaries(lab, mode="outer")
     if skeleton_thickness > 1:
         skel = morphology.dilation(skel, morphology.disk(max(1, skeleton_thickness // 2)))
 
