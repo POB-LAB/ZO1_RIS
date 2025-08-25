@@ -2,20 +2,19 @@ from __future__ import annotations
 
 """Classic, CPU-friendly segmentation methods for ZO-1 images.
 
-This module provides lightweight image segmentation routines that
-approximate the behaviour of the deep learning models used elsewhere in the
-app but run entirely on the CPU.  Three algorithms are provided: Gaussian
-Mixture Models (GMM), K-means clustering, and Otsu/adaptive thresholding.
+This module provides a lightweight Otsu/adaptive thresholding routine that
+approximates the behaviour of the deep learning models used elsewhere in the
+app but runs entirely on the CPU.
 
 Each function expects an 8-bit single channel image (``img_u8``).  Colour
 images should be converted to grayscale before calling these functions.
-The functions return a label image where each integer corresponds to a cell,
-the binary membrane mask used for seeding, and a dictionary of basic
-summary statistics (cell count and mean/median area/diameter).
+The function returns a label image where each integer corresponds to a cell,
+the binary membrane mask used for seeding, and a dictionary of basic summary
+statistics (cell count and mean/median area/diameter).
 
 Example
 -------
->>> labels, membrane, stats = segment_zo1_gmm(img)
+>>> labels, membrane, stats = segment_zo1_otsu(img)
 """
 
 from dataclasses import dataclass
@@ -24,8 +23,6 @@ from typing import Dict, Tuple, Optional
 import numpy as np
 import cv2
 from skimage import filters, morphology, segmentation, measure, feature, util
-from sklearn.mixture import GaussianMixture
-from sklearn.cluster import KMeans
 
 
 @dataclass
@@ -146,56 +143,6 @@ def _apply_ridge(img: np.ndarray) -> np.ndarray:
     ridge = filters.sato(img.astype(float), sigmas=(1, 2, 3))
     ridge = ridge > np.percentile(ridge, 70)
     return ridge.astype(np.uint8)
-
-
-def segment_zo1_gmm(
-    img_u8: np.ndarray,
-    min_obj: int = 200,
-    smooth_sigma: float = 1.0,
-    use_ridge: bool = True,
-    min_peak_dist: int = 8,
-    skeleton_thickness: int = 1,
-) -> SegmentationResult:
-    """Segment membranes using a Gaussian Mixture Model on intensities."""
-
-    blur = cv2.GaussianBlur(img_u8, (0, 0), smooth_sigma)
-    X = blur.reshape(-1, 1).astype(np.float32)
-    gmm = GaussianMixture(n_components=2, covariance_type='full', random_state=0).fit(X)
-    means = gmm.means_.flatten()
-    bright_idx = np.argmax(means)
-    labels = (gmm.predict(X) == bright_idx).reshape(blur.shape).astype(np.uint8)
-
-    mem = cv2.bitwise_and(labels, _apply_ridge(blur)) if use_ridge else labels
-    lab, mem_proc = _postprocess_and_watershed(
-        mem, blur, min_obj, min_peak_dist, skeleton_thickness
-    )
-    _, stats = compute_cell_metrics(lab)
-    return SegmentationResult(lab, mem_proc, stats, labels)
-
-
-def segment_zo1_kmeans(
-    img_u8: np.ndarray,
-    min_obj: int = 200,
-    smooth_sigma: float = 1.0,
-    use_ridge: bool = True,
-    min_peak_dist: int = 8,
-    skeleton_thickness: int = 1,
-) -> SegmentationResult:
-    """Segment membranes using K-means clustering on intensities."""
-
-    blur = cv2.GaussianBlur(img_u8, (0, 0), smooth_sigma)
-    X = blur.reshape(-1, 1).astype(np.float32)
-    km = KMeans(n_clusters=2, n_init=10, random_state=0).fit(X)
-    centers = km.cluster_centers_.flatten()
-    bright_idx = np.argmax(centers)
-    labels = (km.labels_ == bright_idx).reshape(blur.shape).astype(np.uint8)
-
-    mem = cv2.bitwise_and(labels, _apply_ridge(blur)) if use_ridge else labels
-    lab, mem_proc = _postprocess_and_watershed(
-        mem, blur, min_obj, min_peak_dist, skeleton_thickness
-    )
-    _, stats = compute_cell_metrics(lab)
-    return SegmentationResult(lab, mem_proc, stats, labels)
 
 
 def segment_zo1_otsu(

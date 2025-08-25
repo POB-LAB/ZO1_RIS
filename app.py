@@ -23,8 +23,6 @@ from sklearn.mixture import GaussianMixture
 
 # Classic segmentation
 from classic_seg import (
-    segment_zo1_gmm,
-    segment_zo1_kmeans,
     segment_zo1_otsu,
     compute_cell_metrics,
 )
@@ -317,50 +315,7 @@ seg_engine = st.sidebar.selectbox(
     index=0,
 )
 
-if seg_engine == "GPU intense AI method":
-    st.sidebar.markdown("🔬 **GPU Intense AI Parameters**")
-    diam = st.sidebar.slider(
-        "Estimated Cell diameter (px) for better qulity segmentation! 🎯",
-        min_value=20,
-        max_value=200,
-        value=100,
-        step=10,
-        help="Estimate the size of cells in pixels from your image. This is just an estimate - try again if you're not happy with the segmentation! 🧪",
-    )
-else:
-    st.sidebar.markdown("🧪 **Classic Segmentation Parameters**")
-    classic_method = st.sidebar.selectbox(
-        "Method",
-        ["Otsu", "GMM", "K-means", "Adaptive"],
-        index=0,
-    )
-    smooth_sigma = st.sidebar.slider("Smoothing σ", 0.0, 2.0, 1.0, 0.1)
-    min_obj = st.sidebar.slider("Min object size (px)", 5, 1000, 200, 5)
-    min_peak_dist = st.sidebar.slider("Seed min_distance (px)", 1, 20, 8)
-    use_ridge = st.sidebar.checkbox("Ridge filter", True)
-    skeleton_thickness = st.sidebar.slider("Skeleton thickness (px)", 1, 5, 1)
-    adaptive = False
-    block = 51
-    offset = 0.0
-    thresh_multiplier = 1.0
-    if classic_method in ("Otsu", "Adaptive"):
-        if classic_method == "Adaptive":
-            adaptive = True
-            block = st.sidebar.slider("Block size", 3, 255, 51, step=2)
-            offset = st.sidebar.slider("Offset", -30, 30, 0)
-        else:
-            thresh_multiplier = st.sidebar.slider(
-                "💪 Otsu threshold multiplier", 0.0, 4.0, 1.0, 0.1,
-                help="Make Otsu threshold more aggressive for noisy images (higher = stricter filtering)"
-            )
-            st.sidebar.info("Adjust the multiplier to flex the Otsu threshold 💪")
-    pixel_size = st.sidebar.number_input(
-        "Pixel size (µm/px)",
-        min_value=0.0,
-        value=0.0,
-    )
-
-# Run buttons - moved to top for easy access
+# Run buttons - now right after file selection
 st.sidebar.markdown("---")
 st.sidebar.markdown("🚀 **Run Analysis**")
 
@@ -381,8 +336,58 @@ with col2:
         "📊 Run Analysis",
         type="secondary",
         use_container_width=True,
-        disabled=not st.session_state.segmentation_complete
+        disabled=not st.session_state.segmentation_complete,
     )
+
+if seg_engine == "GPU intense AI method":
+    st.sidebar.markdown("🔬 **GPU Intense AI Parameters**")
+    diam = st.sidebar.slider(
+        "Estimated Cell diameter (px) for better qulity segmentation! 🎯",
+        min_value=20,
+        max_value=200,
+        value=100,
+        step=10,
+        help="Estimate the size of cells in pixels from your image. This is just an estimate - try again if you're not happy with the segmentation! 🧪",
+    )
+else:
+    st.sidebar.markdown("🧪 **Classic Segmentation Parameters**")
+    classic_method = st.sidebar.selectbox(
+        "Method",
+        ["Otsu"],
+        index=0,
+    )
+    thresh_multiplier = st.sidebar.slider(
+        "💪 Otsu Strength", 0.0, 4.0, 1.0, 0.1,
+        help="Make Otsu threshold more aggressive for noisy images (higher = stricter filtering)",
+    )
+    st.sidebar.info("🎮 Slide the strength until the contour looks just right! 😄")
+    smooth_sigma = st.sidebar.slider(
+        "Smoothing σ", 0.0, 2.0, 1.0, 0.1,
+        help="Gaussian blur before thresholding to reduce noise"
+    )
+    min_obj = st.sidebar.slider(
+        "Min object size (px)", 5, 1000, 200, 5,
+        help="Ignore segmented regions smaller than this when counting cells"
+    )
+    min_peak_dist = st.sidebar.slider(
+        "Seed min_distance (px)", 1, 20, 8,
+        help="Minimum spacing between watershed seeds; affects cell splitting"
+    )
+    use_ridge = st.sidebar.checkbox(
+        "Ridge filter", True,
+        help="Enhance thin membrane lines before segmentation"
+    )
+    skeleton_thickness = st.sidebar.slider(
+        "Skeleton thickness (px)", 1, 5, 1,
+        help="Thickness of the contour skeleton used for analysis"
+    )
+    pixel_size = st.sidebar.number_input(
+        "Pixel size (µm/px)",
+        min_value=0.0,
+        value=0.0,
+        help="Pixel-to-micron scale for accurate cell measurements"
+    )
+
 
 # Reset button
 if st.session_state.segmentation_complete:
@@ -401,29 +406,11 @@ st.sidebar.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Processing options - moved after run buttons
+# Processing options - image used at original scale
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ **Processing Options**")
-
-# Resampling options
-rescale_option = st.sidebar.selectbox(
-    "Image Processing",
-    options=["Rescale to 512x512 (default)", "No rescale (be ready to wait!)"],
-    index=0,  # 512x512 is default
-    help="Rescale to 512x512 for faster processing, or keep original size (much slower!)"
-)
-
-# Convert to scale factor for internal use - REAL 512px resampling
 H, W = img_gray.shape
-if rescale_option == "Rescale to 512x512 (default)":
-    TARGET = 512
-    scale = min(1.0, TARGET / max(H, W))
-    w_small, h_small = int(round(W * scale)), int(round(H * scale))
-    st.sidebar.info(f"🔍 **Resampling Active**: {W}×{H} → {w_small}×{h_small} (scale={scale:.3f})")
-else:
-    scale = 1.0
-    w_small, h_small = W, H
-    st.sidebar.warning("🐌 **Full Resolution**: Processing at original image size. This will take much longer - grab a coffee! ☕")
+scale = 1.0
 
 # Force CPU-only mode for deployment
 gpu_available = False
@@ -991,17 +978,12 @@ class ZO1RISQuantifier:
 # Segmentation function
 def run_segmentation_only():
     """Run only the AI-powered segmentation step"""
-    
+
     with st.spinner("🤖 Our AI is working its magic on your image... (First run takes longer to load models - grab a coffee! ☕)"):
-        # Downsample if requested - using pre-computed dimensions
         h, w = img_gray.shape
-        if scale < 1.0:
-            small = cv2.resize(img_gray, (w_small, h_small), interpolation=cv2.INTER_AREA)
-            diam_small = max(1, int(round(diam * scale)))
-        else:
-            small = img_gray
-            diam_small = diam
-        
+        small = img_gray
+        diam_small = diam
+
         # Let our AI do its thing! 🚀
         masks_small, flows, styles = cp_model.eval(
             small,
@@ -1012,15 +994,8 @@ def run_segmentation_only():
             resample=True,
             augment=True
         )
-        
-        # Upsample labels back to ORIGINAL size without truncating IDs
-        if scale < 1.0:
-            masks = cv2.resize(
-                masks_small.astype(np.float32), (w, h),
-                interpolation=cv2.INTER_NEAREST
-            ).astype(np.int32)
-        else:
-            masks = masks_small.astype(np.int32)
+
+        masks = masks_small.astype(np.int32)
     
     with st.spinner("🔍 Drawing the cell boundaries (our AI found them!)..."):
         # Create membrane mask for network analysis
@@ -1028,86 +1003,69 @@ def run_segmentation_only():
         
         # Apply AI-powered validation to remove phantom boundaries
         if enable_contour_validation:
-            membrane_mask, ai_mask, otsu_mask = validate_contours_with_ai(contours, img_gray, validation_method, 4)  # Fixed 4-pixel dilation
+            membrane_mask, validation_mask = validate_contours_with_mask(
+                contours, img_gray, validation_method, 4
+            )  # Fixed 4-pixel dilation
+            otsu_mask = validation_mask if validation_method == "Otsu thresholding" else None
         else:
             membrane_mask = contours.astype(np.uint8)
-            ai_mask = None
-            _, otsu_mask = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            membrane_mask = np.logical_and(membrane_mask > 0, otsu_mask > 0).astype(np.uint8)
+            validation_mask = None
+            otsu_mask = None
 
-    return masks, membrane_mask, ai_mask, otsu_mask
+    return masks, membrane_mask, validation_mask, otsu_mask
 
-def validate_contours_with_ai(contours, image, method="K-means clustering", dilation_pixels=4):
-    """
-    Validate AI-generated contours using auxiliary methods to remove phantom boundaries.
-    Only keeps contours where there's actual signal in the image.
-    
+def validate_contours_with_mask(contours, image, method="K-means clustering", dilation_pixels=4):
+    """Validate contours against an intensity-based mask.
+
+    Removes phantom boundaries by requiring signal in a companion mask. When
+    using "Otsu thresholding" this mask *is* the Otsu mask, ensuring
+    segmentation is gated by the Otsu threshold.
+
     Args:
-        contours: Boolean array from find_boundaries
-        image: Original grayscale image
-        method: AI validation method ("K-means clustering", "Gaussian Mixture Model (GMM)", "Otsu thresholding")
-        dilation_pixels: Number of pixels to dilate mask for tolerance
-    
+        contours: Boolean array from find_boundaries.
+        image: Original grayscale image.
+        method: Validation mask method ("K-means clustering", "Gaussian Mixture Model (GMM)", "Otsu thresholding").
+        dilation_pixels: Number of pixels to dilate mask for tolerance.
+
     Returns:
-        Tuple of (validated membrane mask, method-specific mask, otsu mask)
+        Tuple of (validated membrane mask, mask used for validation).
     """
     if method == "K-means clustering":
         # K-means clustering for bimodal images
-        # Reshape image to 1D array for clustering
         pixels = image.reshape(-1, 1).astype(np.float32)
-        
-        # Apply K-means with 2 clusters (foreground vs background)
         kmeans = KMeans(n_clusters=2, n_init=10, max_iter=300, random_state=42)
         labels = kmeans.fit_predict(pixels)
-        
-        # Use the brighter cluster as junction (foreground)
         cluster_centers = kmeans.cluster_centers_.flatten()
         foreground_cluster = np.argmax(cluster_centers)
-        
-        # Create mask from K-means results
-        ai_mask = (labels == foreground_cluster).reshape(image.shape).astype(np.uint8) * 255
-        
+        mask = (labels == foreground_cluster).reshape(image.shape).astype(np.uint8) * 255
+
     elif method == "Gaussian Mixture Model (GMM)":
         # GMM for probabilistic classification
         pixels = image.reshape(-1, 1).astype(np.float32)
-        
-        # Fit 2-component GMM
         gmm = GaussianMixture(n_components=2, covariance_type='full', random_state=42)
         gmm.fit(pixels)
-        
-        # Get posterior probabilities and classify
         probabilities = gmm.predict_proba(pixels)
         labels = np.argmax(probabilities, axis=1)
-        
-        # Use the brighter component as junction
         cluster_centers = gmm.means_.flatten()
         foreground_cluster = np.argmax(cluster_centers)
-        
-        # Create mask from GMM results
-        ai_mask = (labels == foreground_cluster).reshape(image.shape).astype(np.uint8) * 255
-        
+        mask = (labels == foreground_cluster).reshape(image.shape).astype(np.uint8) * 255
+
     else:  # Otsu thresholding (legacy)
         # Apply Otsu thresholding to get signal mask
-        otsu_threshold, ai_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
+        _, mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
     # Create a dilated mask to be more permissive (allow some tolerance)
-    # This helps with slight misalignments between the AI model and validation
+    # This helps with slight misalignments between the model and validation
     if dilation_pixels > 0:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        ai_mask_dilated = cv2.dilate(ai_mask, kernel, iterations=dilation_pixels)
+        mask_dilated = cv2.dilate(mask, kernel, iterations=dilation_pixels)
     else:
-        ai_mask_dilated = ai_mask
-    
-    # Always compute Otsu mask for secondary validation
-    _, otsu_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        mask_dilated = mask
 
-    # Combine: contour must exist AND there must be signal in AI mask
-    validated_mask = np.logical_and(contours > 0, ai_mask_dilated > 0)
+    # Combine: contour must exist AND there must be signal in the mask
+    validated_mask = np.logical_and(contours > 0, mask_dilated > 0).astype(np.uint8)
 
-    # Additional validation with Otsu mask
-    combined_mask = np.logical_and(validated_mask, otsu_mask > 0).astype(np.uint8)
-
-    return combined_mask, ai_mask, otsu_mask
+    return validated_mask, mask
 
 # Analysis function
 def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
@@ -1123,8 +1081,8 @@ def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
         Effective cell diameter in pixels.
     otsu_mask : np.ndarray, optional
         Raw Otsu threshold mask (after applying strength multiplier). When
-        provided for Otsu/Adaptive segmentation, RIS calculations will use
-        this mask directly to ensure consistency with the visualised mask.
+        provided for Otsu segmentation, RIS calculations will use this mask
+        directly to ensure consistency with the visualised mask.
     """
     
     with st.spinner("🧮 Crunching numbers and analyzing your network like a pro..."):
@@ -1152,7 +1110,6 @@ def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
             analysis_mask = membrane_mask
             if (
                 seg_engine == "Classic (GPU)"
-                and classic_method in ("Otsu", "Adaptive")
                 and otsu_mask is not None
             ):
                 analysis_mask = otsu_mask
@@ -1199,53 +1156,31 @@ def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
 if run_segmentation:
     if seg_engine == "GPU intense AI method" and cp_model is not None:
         # Run segmentation only using GPU-intense AI method
-        masks, membrane_mask, ai_mask, otsu_mask = run_segmentation_only()
+        masks, membrane_mask, validation_mask, otsu_mask = run_segmentation_only()
         st.session_state.segmentation_stats = None
         st.session_state.pixel_size = None
         st.session_state.cell_diameter = diam
-        st.session_state.ai_mask = ai_mask
+        st.session_state.validation_mask = validation_mask
         st.session_state.otsu_mask = otsu_mask
     elif seg_engine == "Classic (GPU)":
         img_u8 = img_gray.astype(np.uint8)
-        if classic_method == "GMM":
-            res = segment_zo1_gmm(
-                img_u8,
-                min_obj=min_obj,
-                smooth_sigma=smooth_sigma,
-                use_ridge=use_ridge,
-                min_peak_dist=min_peak_dist,
-                skeleton_thickness=skeleton_thickness,
-            )
-        elif classic_method == "K-means":
-            res = segment_zo1_kmeans(
-                img_u8,
-                min_obj=min_obj,
-                smooth_sigma=smooth_sigma,
-                use_ridge=use_ridge,
-                min_peak_dist=min_peak_dist,
-                skeleton_thickness=skeleton_thickness,
-            )
-        else:
-            res = segment_zo1_otsu(
-                img_u8,
-                adaptive=adaptive if classic_method == "Adaptive" else False,
-                block=block,
-                offset=offset,
-                min_obj=min_obj,
-                smooth_sigma=smooth_sigma,
-                use_ridge=use_ridge,
-                min_peak_dist=min_peak_dist,
-                thresh_multiplier=thresh_multiplier,
-                skeleton_thickness=skeleton_thickness,
-            )
+        res = segment_zo1_otsu(
+            img_u8,
+            min_obj=min_obj,
+            smooth_sigma=smooth_sigma,
+            use_ridge=use_ridge,
+            min_peak_dist=min_peak_dist,
+            thresh_multiplier=thresh_multiplier,
+            skeleton_thickness=skeleton_thickness,
+        )
         masks = res.labels
         otsu_mask = (res.binary_mask > 0).astype(np.uint8) * 255
-        membrane_mask = np.logical_and(res.membrane > 0, otsu_mask > 0).astype(np.uint8)
+        membrane_mask = res.membrane.astype(np.uint8)
         st.session_state.segmentation_stats = res.stats
         st.session_state.pixel_size = pixel_size
         diam = res.stats.get('mean_equiv_diam', 0.0)
         st.session_state.cell_diameter = diam
-        st.session_state.ai_mask = None
+        st.session_state.validation_mask = None
         st.session_state.otsu_mask = otsu_mask
     else:
         masks = None
@@ -1308,7 +1243,6 @@ if st.session_state.segmentation_complete:
     st.sidebar.markdown("**Current Segmentation:**")
     if seg_engine == "GPU intense AI method":
         st.sidebar.markdown(f"- Cell diameter: {diam} px")
-        st.sidebar.markdown(f"- Scale: {scale}x")
         st.sidebar.markdown("- Processing: GPU intense AI")
     else:
         st.sidebar.markdown(f"- Method: {classic_method}")
@@ -1333,7 +1267,7 @@ if st.session_state.segmentation_complete:
         st.image(img_gray, use_container_width=True)
     
     with col2:
-        if seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive"):
+        if seg_engine == "Classic (GPU)":
             st.subheader("Otsu Mask")
         else:
             st.subheader("Cell Boundaries (Validated)")
@@ -1351,7 +1285,7 @@ if st.session_state.segmentation_complete:
                 otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
             else:
                 otsu_mask_resized = otsu_mask
-            if seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive"):
+            if seg_engine == "Classic (GPU)":
                 overlay[otsu_mask_resized > 0, 0] = 255  # Red mask
                 overlay[otsu_mask_resized > 0, 1] = 0
                 overlay[otsu_mask_resized > 0, 2] = 0
@@ -1360,11 +1294,8 @@ if st.session_state.segmentation_complete:
                 overlay[otsu_mask_resized > 0, 0] = 0
                 overlay[otsu_mask_resized > 0, 2] = 0
 
-        if not (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")):
-            if seg_engine == "Classic (GPU)":
-                validated_contours = find_boundaries(masks, mode="outer")
-            else:
-                validated_contours = membrane_mask
+        if seg_engine != "Classic (GPU)":
+            validated_contours = membrane_mask
 
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             thickened_contours = cv2.dilate(validated_contours.astype(np.uint8), kernel, iterations=1)
@@ -1545,7 +1476,7 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
             otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
         else:
             otsu_mask_resized = otsu_mask
-        cmap_color = 'Reds' if (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")) else 'Greens'
+        cmap_color = 'Reds' if seg_engine == "Classic (GPU)" else 'Greens'
         ax.imshow(np.ma.masked_where(otsu_mask_resized == 0, otsu_mask_resized), cmap=cmap_color, alpha=0.3)
     
     if analysis_geometry == "Circles (RIS - recommended)":
@@ -1556,10 +1487,10 @@ if st.session_state.analysis_complete and st.session_state.segmentation_complete
     ax.axis('off')
     
     # Draw contours if requested - use validated membrane mask
-    if show_contours:
+    if show_contours and st.session_state.membrane_mask is not None:
         # Use the validated membrane mask from the quantifier analysis
         validated_membrane_mask = st.session_state.membrane_mask
-        contour_color = 'blue' if (seg_engine == "Classic (GPU)" and classic_method in ("Otsu", "Adaptive")) else 'red'
+        contour_color = 'blue' if seg_engine == "Classic (GPU)" else 'red'
         ax.contour(validated_membrane_mask, [0.5], colors=contour_color, linewidths=1, alpha=0.9)
     
     # Draw analysis overlays based on geometry type
