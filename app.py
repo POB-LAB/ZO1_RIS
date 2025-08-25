@@ -24,25 +24,25 @@ from classic_seg import (
 )
 
 # Sample image generators (to avoid storing binary files)
-def make_sample_grid():
+def make_sample_grid(integrity: float = 1.0):
+    """Create a square grid with optional degradation.
+
+    Parameters
+    ----------
+    integrity : float
+        Fraction of grid lines to preserve (1.0 = perfect grid).
+    """
     arr = np.zeros((256, 256), dtype=np.uint8)
     arr[::32, :] = 255
     arr[:, ::32] = 255
+    if integrity < 1.0:
+        mask = np.random.rand(*arr.shape) < integrity
+        arr = arr * mask
     img = Image.fromarray(arr)
 
     buf = BytesIO()
     img.save(buf, format="PNG")
-    buf.name = "sample_grid.png"
-    buf.type = "image/png"
-    buf.seek(0)
-    return buf
-
-def make_sample_noise():
-    arr = (np.random.rand(256, 256) * 255).astype(np.uint8)
-    img = Image.fromarray(arr)
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.name = "sample_noise.png"
+    buf.name = f"sample_grid_{int(integrity*100)}.png"
     buf.type = "image/png"
     buf.seek(0)
     return buf
@@ -297,14 +297,23 @@ uploaded_file = st.sidebar.file_uploader(
     help="Upload your ZO-1 fluorescence image",
 )
 sample_images = {
-    "sample_grid.png": make_sample_grid,
-    "sample_noise.png": make_sample_noise,
+    "sample_grid_100.png": lambda: make_sample_grid(1.0),
+    "sample_grid_70.png": lambda: make_sample_grid(0.7),
+    "sample_grid_30.png": lambda: make_sample_grid(0.3),
+}
+sample_info = {
+    "sample_grid_100.png": {"square_size": 32, "integrity": "100%"},
+    "sample_grid_70.png": {"square_size": 32, "integrity": "70%"},
+    "sample_grid_30.png": {"square_size": 32, "integrity": "30%"},
 }
 if not uploaded_file:
     choice = st.sidebar.selectbox("Or try a sample image", ["-"] + list(sample_images.keys()), index=0)
     if choice != "-":
         uploaded_file = sample_images[choice]()
-        st.sidebar.info(f"Using sample image: {choice}")
+        info = sample_info.get(choice, {})
+        st.sidebar.info(
+            f"Using sample image: {choice} (square size {info.get('square_size', 'N/A')} px, integrity {info.get('integrity', 'N/A')})"
+        )
 if not uploaded_file:
     st.info("👆 Please upload an image or pick a sample to begin analysis")
     st.markdown("""
@@ -344,7 +353,7 @@ seg_engine = st.sidebar.selectbox(
 )
 
 # default cell diameter estimate (updated after segmentation)
-diam = 100
+diam = 32
 
 # Run buttons - now right after file selection
 st.sidebar.markdown("---")
@@ -811,7 +820,7 @@ class ZO1RISQuantifier:
         initial_area_frac=0.05, max_area_frac=0.70, num_steps=5,
         min_cross_section_distance=10,
         center=None,
-        d_eff_pixels=100,  # effective cell diameter from the UI
+        d_eff_pixels=32,  # effective cell diameter from the UI
         normalization_mode="model",  # "model", "control", or "auto"
         control_dref=None,          # pass a float if normalization_mode=="control"
         use_auto_dref=True          # whether to use automatic d_ref calculation
