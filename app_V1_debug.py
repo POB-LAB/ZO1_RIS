@@ -892,114 +892,113 @@ if run_analysis:
     
     if st.button("🚀 **Run Analysis with Confirmed Parameters**", type="primary"):
         with st.spinner("🔬 Running peak detection analysis..."):
-                # Choose analysis method based on geometry selection
-                if analysis_geometry == "Circles (RIS - recommended)":
-                    # Run RIS analysis with peak detection
-                    radii, N_vals, d_vals, hits_xy, premask = ris_segfree(
-                        img_gray,
-                        use_premask=use_otsu_premask,
-                        premask_strength=otsu_strength,
-                        smooth_window=smooth_win,
-                        z_thresh=peak_strength,
-                        min_sep=min_sep_px,
-                        initial_area_pct=initial_size,
-                        max_area_pct=max_size,
-                        steps=num_steps
-                    )
-                    
-                    # Calculate RIS metrics
-                    d_mean = float(np.mean(d_vals)) if len(d_vals) > 0 else np.nan
-                    d_peak = float(np.max(d_vals)) if len(d_vals) > 0 else np.nan
-                    
-                    # Calculate reference density d_ref and RIS scores
-                    if normalize_ris:
-                        if use_control and control_file:
-                            # TODO: Implement control image processing
-                            # For now, use a placeholder d_ref
-                            d_ref = 0.1  # Placeholder - should be calculated from control image
-                            st.warning("⚠️ Control image processing not yet implemented - using placeholder d_ref")
-                        else:
-                            d_ref = float(packing_factor / float(cell_diam)) if cell_diam > 0 else np.nan
-                        
-                        # Calculate normalized RIS scores (0-1 range)
-                        RIS = float(np.clip(d_mean / d_ref, 0.0, 1.0)) if np.isfinite(d_ref) and d_ref > 0 else np.nan
-                        RIS_peak = float(np.clip(d_peak / d_ref, 0.0, 1.0)) if np.isfinite(d_ref) and d_ref > 0 else np.nan
+            # Choose analysis method based on geometry selection
+            if analysis_geometry == "Circles (RIS - recommended)":
+                # Run RIS analysis with peak detection
+                radii, N_vals, d_vals, hits_xy, premask = ris_segfree(
+                    img_gray,
+                    use_premask=use_otsu_premask,
+                    premask_strength=otsu_strength,
+                    smooth_window=smooth_win,
+                    z_thresh=peak_strength,
+                    min_sep=min_sep_px,
+                    initial_area_pct=initial_size,
+                    max_area_pct=max_size,
+                    steps=num_steps
+                )
+
+                # Calculate RIS metrics
+                d_mean = float(np.mean(d_vals)) if len(d_vals) > 0 else np.nan
+                d_peak = float(np.max(d_vals)) if len(d_vals) > 0 else np.nan
+
+                # Calculate reference density d_ref and RIS scores
+                if normalize_ris:
+                    if use_control and control_file:
+                        # TODO: Implement control image processing
+                        # For now, use a placeholder d_ref
+                        d_ref = 0.1  # Placeholder - should be calculated from control image
+                        st.warning("⚠️ Control image processing not yet implemented - using placeholder d_ref")
                     else:
-                        # No normalization - use raw density values
-                        d_ref = np.nan
-                        RIS = d_mean  # Raw density value
-                        RIS_peak = d_peak  # Raw peak density value
-                    
-                    # Store results
-                    st.session_state.quantifier_results = {
-                        "mode": "RIS_segfree",
-                        "radii": radii,
-                        "crossings": N_vals,
-                        "radial_density": d_vals,
-                        "hits_xy": hits_xy,
-                        "premask": premask,
-                        "d_mean": d_mean,
-                        "d_peak": d_peak,
-                        "d_ref": d_ref,
-                        "RIS": RIS,
-                        "RIS_peak": RIS_peak,
-                        "kappa": packing_factor,
-                        "cell_diameter_used": cell_diam,
-                        "used_control_image": use_control,
-                        "normalized": normalize_ris,
-                        "params": {
-                            "initial_area_pct": initial_size,
-                            "max_area_pct": max_size,
-                            "steps": num_steps,
-                            "smooth_window": smooth_win,
-                            "z_thresh": peak_strength,
-                            "min_sep": min_sep_px,
-                            "otsu": use_otsu_premask,
-                            "otsu_strength": otsu_strength,
-                            "packing_factor": packing_factor,
-                            "diam": cell_diam,
-                            "normalized": normalize_ris
-                        }
-                    }
-                    
+                        d_ref = float(packing_factor / float(cell_diam)) if cell_diam > 0 else np.nan
+
+                    # Calculate normalized RIS scores (0-1 range)
+                    RIS = float(np.clip(d_mean / d_ref, 0.0, 1.0)) if np.isfinite(d_ref) and d_ref > 0 else np.nan
+                    RIS_peak = float(np.clip(d_peak / d_ref, 0.0, 1.0)) if np.isfinite(d_ref) and d_ref > 0 else np.nan
                 else:
-                    # Run TiJOR analysis with peak detection
-                    sides, counts, tijor_vals, pts, premask = tijor_segfree(
-                        img_gray,
-                        use_premask=use_otsu_premask,
-                        premask_strength=otsu_strength,
-                        smooth_window=smooth_win,
-                        z_thresh=peak_strength,
-                        min_sep=min_sep_px,
-                        initial_area_pct=initial_size,
-                        max_area_pct=max_size,
-                        steps=num_steps
-                    )
-                    
-                    # Store results
-                    st.session_state.quantifier_results = {
-                        "mode": "TiJOR_segfree",
-                        "sides": sides,
-                        "counts": counts,
-                        "tijor": tijor_vals,
-                        "points": pts,
-                        "premask": premask,
-                        "params": {
-                            "initial_area_pct": initial_size,
-                            "max_area_pct": max_size,
-                            "steps": num_steps,
-                            "smooth_window": smooth_win,
-                            "z_thresh": peak_strength,
-                            "min_sep": min_sep_px,
-                            "otsu": use_otsu_premask,
-                            "otsu_strength": otsu_strength
-                        }
+                    # No normalization - use raw density values
+                    d_ref = np.nan
+                    RIS = d_mean  # Raw density value
+                    RIS_peak = d_peak  # Raw peak density value
+
+                # Store results
+                st.session_state.quantifier_results = {
+                    "mode": "RIS_segfree",
+                    "radii": radii,
+                    "crossings": N_vals,
+                    "radial_density": d_vals,
+                    "hits_xy": hits_xy,
+                    "premask": premask,
+                    "d_mean": d_mean,
+                    "d_peak": d_peak,
+                    "d_ref": d_ref,
+                    "RIS": RIS,
+                    "RIS_peak": RIS_peak,
+                    "kappa": packing_factor,
+                    "cell_diameter_used": cell_diam,
+                    "used_control_image": use_control,
+                    "normalized": normalize_ris,
+                    "params": {
+                        "initial_area_pct": initial_size,
+                        "max_area_pct": max_size,
+                        "steps": num_steps,
+                        "smooth_window": smooth_win,
+                        "z_thresh": peak_strength,
+                        "min_sep": min_sep_px,
+                        "otsu": use_otsu_premask,
+                        "otsu_strength": otsu_strength,
+                        "packing_factor": packing_factor,
+                        "diam": cell_diam,
+                        "normalized": normalize_ris
                     }
-            
+                }
+            else:
+                # Run TiJOR analysis with peak detection
+                sides, counts, tijor_vals, pts, premask = tijor_segfree(
+                    img_gray,
+                    use_premask=use_otsu_premask,
+                    premask_strength=otsu_strength,
+                    smooth_window=smooth_win,
+                    z_thresh=peak_strength,
+                    min_sep=min_sep_px,
+                    initial_area_pct=initial_size,
+                    max_area_pct=max_size,
+                    steps=num_steps
+                )
+
+                # Store results
+                st.session_state.quantifier_results = {
+                    "mode": "TiJOR_segfree",
+                    "sides": sides,
+                    "counts": counts,
+                    "tijor": tijor_vals,
+                    "points": pts,
+                    "premask": premask,
+                    "params": {
+                        "initial_area_pct": initial_size,
+                        "max_area_pct": max_size,
+                        "steps": num_steps,
+                        "smooth_window": smooth_win,
+                        "z_thresh": peak_strength,
+                        "min_sep": min_sep_px,
+                        "otsu": use_otsu_premask,
+                        "otsu_strength": otsu_strength
+                    }
+                }
+
             # Update session state
             st.session_state.analysis_complete = True
             st.success("🚀 Bam! Peak detection analysis complete! Your ZO-1 network is now quantified!")
-            
+
             # Add a fun completion message
             st.markdown("""
             <div class="fun-fact">
