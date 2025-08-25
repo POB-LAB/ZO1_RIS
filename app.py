@@ -12,6 +12,7 @@ import cv2
 from PIL import Image
 import pandas as pd
 from io import StringIO, BytesIO
+from skimage import segmentation as skseg
 
 # AI segmentation imports
 # (Cellpose and other GPU-heavy AI features removed for this deployment version)
@@ -314,7 +315,7 @@ if not uploaded_file:
     st.stop()
 
 # Load and process image
-@st.cache_data
+@st.cache_data(hash_funcs={BytesIO: lambda f: f.getvalue()})
 def load_image(uploaded_file):
     """Load and preprocess uploaded image"""
     pil_img = Image.open(uploaded_file)
@@ -403,12 +404,6 @@ else:
     skeleton_thickness = st.sidebar.slider(
         "Skeleton thickness (px)", 1, 5, 1,
         help="Thickness of the contour skeleton used for analysis"
-    )
-    pixel_size = st.sidebar.number_input(
-        "Pixel size (µm/px)",
-        min_value=0.0,
-        value=0.0,
-        help="Pixel-to-micron scale for accurate cell measurements"
     )
 
 
@@ -973,7 +968,9 @@ def run_network_analysis(masks, membrane_mask, diam, otsu_mask=None):
             else:  # Control mode
                 quantifier_mode = "control"
             
-            analysis_mask = otsu_mask if otsu_mask is not None else membrane_mask
+            analysis_mask = otsu_mask
+            if analysis_mask is None:
+                analysis_mask = membrane_mask
 
             results = quantifier.quantify_network(
                 analysis_mask,
@@ -1034,7 +1031,6 @@ if run_segmentation:
         otsu_mask = (res.binary_mask > 0).astype(np.uint8) * 255
         membrane_mask = res.membrane.astype(np.uint8)
         st.session_state.segmentation_stats = res.stats
-        st.session_state.pixel_size = pixel_size
         diam = res.stats.get('mean_equiv_diam', 0.0)
         st.session_state.cell_diameter = diam
         st.session_state.otsu_mask = otsu_mask
@@ -1109,24 +1105,20 @@ if st.session_state.segmentation_complete:
 
     # Quick segmentation preview
     st.markdown("## 🔬 Segmentation Results")
-    
+
+    # Ensure original image matches mask dimensions
+    if img_gray.shape != masks.shape:
+        img_gray_resized = cv2.resize(img_gray, (masks.shape[1], masks.shape[0]), interpolation=cv2.INTER_LINEAR)
+    else:
+        img_gray_resized = img_gray
+
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Original Image")
-        st.image(img_gray, use_container_width=True)
-    
-    with col2:
-        st.subheader("Otsu Mask")
-        # Create overlay with contours - ensure same dimensions
-        if img_gray.shape != masks.shape:
-            # Resize img_gray to match masks dimensions
-            img_gray_resized = cv2.resize(img_gray, (masks.shape[1], masks.shape[0]), interpolation=cv2.INTER_LINEAR)
-        else:
-            img_gray_resized = img_gray
-
+        st.subheader("Original + Otsu")
+        show_otsu = st.checkbox("Show Otsu overlay", value=True)
         overlay = np.stack([img_gray_resized]*3, axis=-1)
         otsu_mask = st.session_state.get('otsu_mask')
-        if otsu_mask is not None:
+        if show_otsu and otsu_mask is not None:
             if img_gray_resized.shape != otsu_mask.shape:
                 otsu_mask_resized = cv2.resize(otsu_mask, (img_gray_resized.shape[1], img_gray_resized.shape[0]), interpolation=cv2.INTER_NEAREST)
             else:
@@ -1134,16 +1126,20 @@ if st.session_state.segmentation_complete:
             overlay[otsu_mask_resized > 0, 0] = 255  # Red mask
             overlay[otsu_mask_resized > 0, 1] = 0
             overlay[otsu_mask_resized > 0, 2] = 0
-
         st.image(overlay, use_container_width=True)
+
+    with col2:
+        st.subheader("Original + Cell Mask")
+        cell_overlay = np.stack([img_gray_resized]*3, axis=-1)
+        boundaries = skseg.find_boundaries(masks, mode="outer")
+        cell_overlay[boundaries, 2] = 255  # Blue boundaries
+        st.image(cell_overlay, use_container_width=True)
 
         if st.session_state.segmentation_stats:
             stats = st.session_state.segmentation_stats
             st.markdown("### Summary")
             st.write(f"Cells: {stats['n_cells']} | Mean area: {stats['mean_area']:.1f} px² | Mean equiv. diam: {stats['mean_equiv_diam']:.2f} px")
-            if st.session_state.pixel_size:
-                st.write(f"Mean area: {stats.get('mean_area_um2',0):.1f} µm² | Mean equiv. diam: {stats.get('mean_equiv_diam_um',0):.2f} µm")
-            df, _ = compute_cell_metrics(masks, pixel_size=st.session_state.pixel_size)
+            df, _ = compute_cell_metrics(masks)
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button('Export CSV', csv, 'cell_metrics.csv', 'text/csv')
             report_lines = [f"{k}: {v}" for k, v in stats.items()]
