@@ -1130,63 +1130,11 @@ if st.session_state.analysis_complete and st.session_state.quantifier_results:
     # All visualization is now handled in the main image display section above
     
     # All visualization is now handled in the main image display section above
-    else:
-        # Draw rectangles and peak points for TiJOR analysis
-        if show_rectangles or show_cross_sections:
-            center_x = img_gray.shape[1] / 2
-            center_y = img_gray.shape[0] / 2
-            
-            if 'sides' in results:
-                sides = results['sides']
-                colors = plt.cm.Reds(np.linspace(0.3, 1, len(sides)))
-                
-                for i, side in enumerate(sides):
-                    half_side = side / 2
-                    
-                    if show_rectangles:
-                        rect = Rectangle(
-                            (center_x - half_side, center_y - half_side),
-                            side, side,
-                            linewidth=2,
-                            edgecolor=colors[i],
-                            facecolor='none',
-                            linestyle='--',
-                            alpha=0.7
-                        )
-                        ax.add_patch(rect)
-        
-        # Plot peak points if requested
-        if show_cross_sections and 'points' in results:
-            points = results['points']
-            if len(points) > 0:
-                ax.scatter(points[:, 0], points[:, 1], 
-                           c='cyan', s=20, alpha=1.0, edgecolors='white', linewidth=1,
-                           label=f'Peaks ({len(points)})')
-                ax.legend(loc='upper right', fontsize=10)
-    
-    # Add summary text below the image
-    if mode_tag.startswith("RIS"):
-        RIS = results.get("RIS", np.nan)
-        if np.isfinite(RIS):
-            summary_text = f'RIS: {RIS:.3f}'
-        else:
-            summary_text = 'RIS analysis in progress...'
-    else:
-        tijor_vals = results.get("tijor", [])
-        if len(tijor_vals) > 0:
-            summary_text = f'Mean TiJOR: {np.mean(tijor_vals):.4f} | Total Peaks: {len(results.get("points", []))}'
-        else:
-            summary_text = 'TiJOR analysis in progress...'
-    
-    fig.text(0.5, -0.05, summary_text, ha='center', va='bottom', fontsize=12, 
-             bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-    
-    plt.tight_layout()
-    st.pyplot(fig)
-    
+    pass
+
     # Add the analysis results plot below the main image
     st.markdown("---")
-    
+
     if mode_tag.startswith("RIS"):
         st.markdown("### 📈 RIS — Radial Profile")
         
