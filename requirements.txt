@@ -7,9 +7,3 @@ opencv-python-headless>=4.8.0
 Pillow>=10.0.0
 pandas>=2.0.0
 scikit-image>=0.20.0
-scikit-learn>=1.3.0
-# CPU-only PyTorch for deployment (fixed syntax)
-torch>=2.0.0
-torchvision>=0.15.0
-# Cellpose
-cellpose>=2.0.0

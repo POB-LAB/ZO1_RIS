@@ -1,15 +1,15 @@
 # ZO-1 Network Analysis Tool (Deployment Version)
 
 ## Overview
-This is a deployment-ready version of the ZO-1 Network Analysis Tool, optimized for Streamlit Cloud deployment. The tool performs AI-powered cell segmentation and network analysis using the Radial Integrity Score (RIS) method.
+This is a deployment-ready version of the ZO-1 Network Analysis Tool, optimized for Streamlit Cloud deployment. The tool performs classic cell segmentation and network analysis using the Radial Integrity Score (RIS) method. For GPU-powered AI segmentation, contact us for access to our standalone app.
 
 ## Key Features
-- **AI-Powered Segmentation**: Uses Cellpose for automatic cell detection
 - **RIS Analysis**: Implements Radial Integrity Score for network quantification
 - **CPU-Optimized**: Designed for deployment without GPU requirements
 - **Smart Resampling**: Default 512x512 processing with option for full resolution
 - **Export Functionality**: CSV and detailed report downloads
 - **Classic Segmentation Toolkit**: Otsu thresholding by default with adjustable strength, optional ridge filtering, watershed-based labelling and skeletonisation with configurable thickness
+- **AI Segmentation (External)**: GPU-powered Cellpose segmentation available on request – contact us for the standalone app!
 
 ## 🚀 **Live Demo**
 Access the deployed application at: [Your Streamlit Cloud URL]
@@ -22,7 +22,7 @@ Access the deployed application at: [Your Streamlit Cloud URL]
 ## 🖥️ **System Requirements**
 - **Deployment**: Streamlit Cloud (CPU-only)
 - **Memory**: Optimized for cloud deployment
-- **Processing**: CPU-based AI segmentation
+- **Processing**: CPU-based classic segmentation
 - **Storage**: Temporary image processing (no data stored)
 
 ## Deployment
@@ -36,16 +36,18 @@ This version is optimized for Streamlit Cloud deployment with:
 For batch operations or technical support, contact: pierre.bagnaninchi@ed.ac.uk
 
 ## Usage
-1. Upload a ZO-1 fluorescence image
+1. Upload a ZO-1 fluorescence image (or try a built-in sample image)
 2. Adjust cell diameter estimate if needed
 3. Run segmentation
 4. Run analysis
 5. Download results
 
+**Note:** Sample images are generated on the fly to keep the repository text-only. The
+original hexagonal-network TIFF examples were converted to lightweight PNGs for documentation, but are no longer stored as binary files.
+
 ## Technical Notes
 - Default image resampling to 512x512 for faster processing
 - Full resolution option available (but slower)
-- AI contour validation to remove phantom boundaries
 - Automatic scaling compensation for RIS calculations
 
 ## 🔧 **Local Development** (Optional)
