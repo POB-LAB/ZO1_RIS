@@ -156,6 +156,7 @@ def segment_zo1_otsu(
     min_peak_dist: int = 8,
     thresh_multiplier: float = 1.0,
     skeleton_thickness: int = 1,
+    denoise_size: int = 3,
 ) -> SegmentationResult:
     """Segment membranes using Otsu or adaptive thresholding.
 
@@ -181,9 +182,20 @@ def segment_zo1_otsu(
         Multiplier applied to Otsu threshold, by default 1.0.
     skeleton_thickness : int, optional
         Pixel thickness of the returned skeleton, by default 1.
+    denoise_size : int, optional
+        Kernel size for median filtering to remove salt-and-pepper noise,
+        by default 3. If <= 1, no median filtering is applied.
     """
 
-    blur = cv2.GaussianBlur(img_u8, (0, 0), smooth_sigma)
+    # Remove salt-and-pepper noise prior to Gaussian smoothing
+    if denoise_size and denoise_size > 1:
+        if denoise_size % 2 == 0:
+            denoise_size += 1  # kernel size must be odd
+        prep = cv2.medianBlur(img_u8, denoise_size)
+    else:
+        prep = img_u8
+
+    blur = cv2.GaussianBlur(prep, (0, 0), smooth_sigma)
     if adaptive:
         if block % 2 == 0:
             block += 1  # ensure odd
