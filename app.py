@@ -135,6 +135,7 @@ def apply_otsu_mask(img, strength=1.0):
 # Peak detection-based quantification functions
 def ris_segfree(img_gray,
                 use_premask=True, premask_strength=1.0,
+                denoise_size=3, gauss_sigma=1.0,
                 smooth_window=9, z_thresh=2.0, min_sep=10,
                 initial_area_pct=10.0, max_area_pct=70.0, steps=5):
     """RIS quantification using peak detection along circular sampling paths."""
@@ -143,6 +144,16 @@ def ris_segfree(img_gray,
     mask_used = None
     if use_premask:
         work, mask_used = apply_otsu_mask(img_gray, strength=premask_strength)
+
+    # Median prefilter to remove salt-and-pepper noise
+    work_u8 = np.clip(work, 0, 255).astype(np.uint8)
+    if denoise_size and denoise_size > 1:
+        if denoise_size % 2 == 0:
+            denoise_size += 1
+        work_u8 = cv2.medianBlur(work_u8, denoise_size)
+
+    # Gaussian smoothing for stability
+    work = cv2.GaussianBlur(work_u8, (0, 0), gauss_sigma).astype(np.float32)
 
     A = H*W
     r0 = np.sqrt((initial_area_pct/100.0 * A)/np.pi)
@@ -177,6 +188,7 @@ def ris_segfree(img_gray,
 
 def tijor_segfree(img_gray,
                   use_premask=True, premask_strength=1.0,
+                  denoise_size=3, gauss_sigma=1.0,
                   smooth_window=9, z_thresh=2.0, min_sep=10,
                   initial_area_pct=10.0, max_area_pct=70.0, steps=5):
     """TiJOR quantification using peak detection along rectangular sampling paths."""
@@ -185,6 +197,16 @@ def tijor_segfree(img_gray,
     mask_used = None
     if use_premask:
         work, mask_used = apply_otsu_mask(img_gray, strength=premask_strength)
+
+    # Median prefilter for salt-and-pepper noise
+    work_u8 = np.clip(work, 0, 255).astype(np.uint8)
+    if denoise_size and denoise_size > 1:
+        if denoise_size % 2 == 0:
+            denoise_size += 1
+        work_u8 = cv2.medianBlur(work_u8, denoise_size)
+
+    # Gaussian smoothing
+    work = cv2.GaussianBlur(work_u8, (0, 0), gauss_sigma).astype(np.float32)
 
     A = H*W
     side0 = np.sqrt((initial_area_pct/100.0)*A)

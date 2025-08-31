@@ -77,6 +77,7 @@ def sample_circle(cx, cy, r, H, W):
 
 def ris_segfree(img_gray,
                 use_premask=True, premask_strength=1.0,
+                denoise_size=3, gauss_sigma=1.0,
                 smooth_window=9, z_thresh=2.0, min_sep=10,
                 initial_area_pct=10.0, max_area_pct=70.0, steps=5):
     H, W = img_gray.shape
@@ -84,6 +85,16 @@ def ris_segfree(img_gray,
     mask_used = None
     if use_premask:
         work, mask_used = apply_otsu_mask(img_gray, strength=premask_strength)
+
+    # Remove salt-and-pepper noise with median filtering
+    work_u8 = np.clip(work, 0, 255).astype(np.uint8)
+    if denoise_size and denoise_size > 1:
+        if denoise_size % 2 == 0:
+            denoise_size += 1
+        work_u8 = cv2.medianBlur(work_u8, denoise_size)
+
+    # Apply Gaussian smoothing for more stable peak detection
+    work = cv2.GaussianBlur(work_u8, (0, 0), gauss_sigma).astype(np.float32)
     A = H * W
     r0 = np.sqrt((initial_area_pct / 100.0 * A) / np.pi)
     r1 = np.sqrt((max_area_pct / 100.0 * A) / np.pi)
